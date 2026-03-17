@@ -671,15 +671,22 @@ def main():
 
             cfd_df = pd.DataFrame(cfd_data)
 
+            def hex_to_rgba(hex_color, alpha=0.25):
+                """Convert hex color to rgba string for Plotly."""
+                h = hex_color.lstrip("#")
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                return f"rgba({r},{g},{b},{alpha})"
+
             fig = go.Figure()
             for status in reversed(STATUS_ORDER):
                 if status in cfd_df.columns and cfd_df[status].sum() > 0:
+                    color = STATUS_COLORS.get(status, "#64748b")
                     fig.add_trace(go.Scatter(
                         x=cfd_df["Data"], y=cfd_df[status],
                         mode="lines", stackgroup="one",
                         name=status,
-                        line=dict(color=STATUS_COLORS.get(status, "#64748b"), width=0.5),
-                        fillcolor=STATUS_COLORS.get(status, "#64748b") + "40",
+                        line=dict(color=color, width=0.5),
+                        fillcolor=hex_to_rgba(color, 0.25),
                     ))
 
             fig.update_layout(
