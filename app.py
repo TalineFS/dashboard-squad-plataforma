@@ -55,20 +55,27 @@ TYPE_COLORS = {
 # ─── JIRA API ───
 @st.cache_data(ttl=300)
 def fetch_jira_issues():
-    """Busca todas as issues do projeto SPT via Jira API."""
+    """Busca todas as issues do projeto SPT via Jira API (endpoint /search/jql)."""
     all_issues = []
-    start_at = 0
-    max_results = 100
+    next_page_token = None
 
     while True:
-        url = f"{JIRA_URL}/rest/api/3/search"
-        params = {
+        url = f"{JIRA_URL}/rest/api/3/search/jql"
+        payload = {
             "jql": f"project = {PROJECT_KEY} ORDER BY created DESC",
-            "startAt": start_at,
-            "maxResults": max_results,
-            "fields": "summary,status,issuetype,priority,assignee,created,resolutiondate,updated,resolution,labels,duedate",
+            "maxResults": 100,
+            "fields": [
+                "summary", "status", "issuetype", "priority", "assignee",
+                "created", "resolutiondate", "updated", "resolution", "labels", "duedate"
+            ],
         }
-        response = requests.get(url, params=params, auth=(JIRA_EMAIL, JIRA_TOKEN))
+        if next_page_token:
+            payload["nextPageToken"] = next_page_token
+
+        response = requests.post(
+            url, json=payload, auth=(JIRA_EMAIL, JIRA_TOKEN),
+            headers={"Content-Type": "application/json"}
+        )
 
         if response.status_code != 200:
             st.error(f"Erro ao conectar com Jira: {response.status_code} — {response.text}")
@@ -101,9 +108,10 @@ def fetch_jira_issues():
                 "duedate": f.get("duedate", None),
             })
 
-        if start_at + max_results >= data.get("total", 0):
+        # Pagination via nextPageToken
+        next_page_token = data.get("nextPageToken")
+        if not next_page_token:
             break
-        start_at += max_results
 
     df = pd.DataFrame(all_issues)
     if not df.empty:
