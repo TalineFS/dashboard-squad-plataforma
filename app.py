@@ -468,7 +468,7 @@ def main():
             has_due["due_week"] = has_due["duedate_dt"].dt.strftime("%Y-S%U")
 
             # ─── KPIs de Planejados x Entregues ───
-            total_planned = len(has_due[has_due["duedate_dt"].normalize() <= today])
+            total_planned = len(has_due[has_due["duedate_dt"].dt.normalize() <= today])
             on_time = len(has_due[has_due["entrega"] == "✅ No prazo"])
             late = len(has_due[has_due["entrega"] == "⚠️ Com atraso"])
             not_delivered = len(has_due[has_due["entrega"] == "❌ Não entregue"])
@@ -553,7 +553,7 @@ def main():
 
             # ─── Taxa de entrega no prazo por pessoa ───
             st.markdown("##### 📊 Taxa de Entrega no Prazo por Pessoa")
-            due_past = has_due[has_due["duedate_dt"].normalize() <= today].copy()
+            due_past = has_due[has_due["duedate_dt"].dt.normalize() <= today].copy()
 
             if not due_past.empty:
                 person_delivery = due_past.groupby("assignee").agg(
