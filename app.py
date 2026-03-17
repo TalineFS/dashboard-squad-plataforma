@@ -23,8 +23,8 @@ PROJECT_KEY = "SPT"
 
 # ─── TEAM CONFIG ───
 TEAM = {
-    "hgp": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
-    "gfm": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
+    "hgp": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
+    "gfm": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
     "Leonardo Almeida": {"name": "Leonardo", "role": "QA Automação", "color": "#10b981"},
     "Marcelo Oliveira": {"name": "Marcelo", "role": "Eng. Backend", "color": "#ef4444"},
     "ats": {"name": "Sato", "role": "Eng. Mobile", "color": "#ec4899"},
