@@ -278,6 +278,22 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
+        st.markdown("---")
+        user = st.session_state.get("user", "")
+        st.caption(f"👤 Logado como: **{user}**")
+        if st.button("🚪 Sair", use_container_width=True):
+            st.session_state["authenticated"] = False
+            st.session_state["user"] = ""
+            st.rerun()
+
+        st.markdown("---")
+        current_user = st.session_state.get("user", "")
+        st.markdown(f"👤 Logado como: **{current_user}**")
+        if st.button("🚪 Sair", use_container_width=True):
+            st.session_state["authenticated"] = False
+            st.session_state["user"] = ""
+            st.rerun()
+
     # Apply filters
     filtered = df[
         (df["type"].isin(type_filter))
@@ -835,5 +851,48 @@ def main():
     )
 
 
+# ─── AUTHENTICATION (Senha simples) ───
+def check_password():
+    """Tela de login simples. Retorna True se autenticado."""
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.markdown(
+        """
+        <div style="display:flex; justify-content:center; margin-top:80px;">
+            <div style="text-align:center;">
+                <h1>📊 Dashboard Kanban</h1>
+                <h3 style="color:#94a3b8; font-weight:400;">Squad Plataforma | TFSports</h3>
+                <p style="color:#64748b; margin-top:20px;">Digite suas credenciais para acessar o painel.</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown("")
+        with st.form("login_form"):
+            username = st.text_input("👤 Usuário", placeholder="Digite seu usuário")
+            password = st.text_input("🔒 Senha", type="password", placeholder="Digite sua senha")
+            submitted = st.form_submit_button("Entrar", use_container_width=True, type="primary")
+
+            if submitted:
+                valid_users = st.secrets.get("auth", {}).get("users", {})
+                if username in valid_users and valid_users[username] == password:
+                    st.session_state["authenticated"] = True
+                    st.session_state["user"] = username
+                    st.rerun()
+                else:
+                    st.error("❌ Usuário ou senha incorretos.")
+
+        st.caption("Acesso restrito à equipe TFSports.")
+
+    return False
+
+
 if __name__ == "__main__":
-    main()
+    if check_password():
+        main()
