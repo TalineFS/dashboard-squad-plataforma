@@ -286,14 +286,6 @@ def main():
             st.session_state["user"] = ""
             st.rerun()
 
-        st.markdown("---")
-        current_user = st.session_state.get("user", "")
-        st.markdown(f"👤 Logado como: **{current_user}**")
-        if st.button("🚪 Sair", use_container_width=True):
-            st.session_state["authenticated"] = False
-            st.session_state["user"] = ""
-            st.rerun()
-
     # Apply filters
     filtered = df[
         (df["type"].isin(type_filter))
