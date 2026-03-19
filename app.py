@@ -66,7 +66,8 @@ def fetch_jira_issues():
             "maxResults": 100,
             "fields": [
                 "summary", "status", "issuetype", "priority", "assignee",
-                "created", "resolutiondate", "updated", "resolution", "labels", "duedate"
+                "created", "resolutiondate", "updated", "resolution", "labels",
+                "duedate", "parent", "issuelinks"
             ],
         }
         if next_page_token:
@@ -106,6 +107,21 @@ def fetch_jira_issues():
                 "resolution": (f.get("resolution") or {}).get("name", None),
                 "labels": f.get("labels", []),
                 "duedate": f.get("duedate", None),
+                "parent_key": f.get("parent", {}).get("key", None) if f.get("parent") else None,
+                "parent_summary": f.get("parent", {}).get("fields", {}).get("summary", None) if f.get("parent") else None,
+                "links": [
+                    {
+                        "type": link.get("type", {}).get("name", ""),
+                        "direction": "outward" if "outwardIssue" in link else "inward",
+                        "linked_key": link.get("outwardIssue", link.get("inwardIssue", {})).get("key", ""),
+                        "linked_summary": link.get("outwardIssue", link.get("inwardIssue", {})).get("fields", {}).get("summary", ""),
+                        "linked_status": link.get("outwardIssue", link.get("inwardIssue", {})).get("fields", {}).get("status", {}).get("name", ""),
+                        "inward_label": link.get("type", {}).get("inward", ""),
+                        "outward_label": link.get("type", {}).get("outward", ""),
+                    }
+                    for link in f.get("issuelinks", [])
+                    if "outwardIssue" in link or "inwardIssue" in link
+                ],
             })
 
         # Pagination via nextPageToken
@@ -296,8 +312,9 @@ def main():
         filtered = filtered[~filtered["is_subtask"]]
 
     # ─── TABS ───
-    tab1, tab_plan, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Visão Geral", "🎯 Planejados x Entregues", "🔄 Fluxo", "👤 Pessoas", "🚨 Alertas", "📋 Todos os Itens"
+    tab1, tab_plan, tab_gantt, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Visão Geral", "🎯 Planejados x Entregues", "📅 Gantt Épicos",
+        "🔄 Fluxo", "👤 Pessoas", "🚨 Alertas", "📋 Todos os Itens"
     ])
 
     # ═══════════════════════════════════════
@@ -614,6 +631,239 @@ def main():
             ]].sort_values("duedate", ascending=False)
             display_has_due.columns = ["Key", "Resumo", "Status", "Responsável", "Due Date", "Resolvido", "Entrega"]
             st.dataframe(display_has_due, hide_index=True, use_container_width=True, height=400)
+
+    # ═══════════════════════════════════════
+    # TAB GANTT — ÉPICOS
+    # ═══════════════════════════════════════
+    with tab_gantt:
+        st.markdown("#### 📅 Gantt de Épicos — Progresso e Dependências")
+        st.caption("Cada épico mostra a barra de tempo (criação → due date) com o percentual de conclusão baseado nas tarefas filhas.")
+
+        # Get epics
+        epics = df[df["type"] == "Epic"].copy()
+
+        if epics.empty:
+            st.warning("Nenhum épico encontrado no projeto.")
+        else:
+            today = pd.Timestamp.now().normalize()
+
+            # For each epic, find its children and calculate progress
+            epic_data = []
+            for _, epic in epics.iterrows():
+                children = df[df["parent_key"] == epic["key"]]
+                total_children = len(children)
+                done_children = len(children[children["status"] == "Done"])
+                progress = (done_children / total_children * 100) if total_children > 0 else 0
+
+                # Dates
+                start_date = epic["created_dt"]
+                end_date = epic["duedate_dt"] if pd.notna(epic.get("duedate_dt")) else None
+
+                # If no due date, estimate from children's max due date or use today + 30d
+                if end_date is None or pd.isna(end_date):
+                    children_due = children["duedate_dt"].dropna()
+                    if not children_due.empty:
+                        end_date = children_due.max()
+                    else:
+                        end_date = today + pd.Timedelta(days=30)
+
+                # Ensure end_date is after start_date
+                if end_date <= start_date:
+                    end_date = start_date + pd.Timedelta(days=14)
+
+                # Status color
+                if progress == 100:
+                    bar_color = "#10b981"
+                elif progress >= 50:
+                    bar_color = "#f59e0b"
+                elif progress > 0:
+                    bar_color = "#60a5fa"
+                else:
+                    bar_color = "#94a3b8"
+
+                # Dependencies from issuelinks
+                dependencies = []
+                if isinstance(epic.get("links"), list):
+                    for link in epic["links"]:
+                        link_type = link.get("type", "")
+                        if link_type.lower() in ["blocks", "is blocked by", "depends on", "bloqueado por"]:
+                            dependencies.append({
+                                "type": link.get("outward_label", link_type),
+                                "target": link.get("linked_key", ""),
+                                "target_summary": link.get("linked_summary", ""),
+                            })
+
+                epic_data.append({
+                    "key": epic["key"],
+                    "summary": epic["summary"],
+                    "status": epic["status"],
+                    "assignee": epic["assignee"],
+                    "start": start_date,
+                    "end": end_date,
+                    "progress": round(progress, 1),
+                    "total_children": total_children,
+                    "done_children": done_children,
+                    "color": bar_color,
+                    "dependencies": dependencies,
+                    "children": children,
+                })
+
+            if not epic_data:
+                st.warning("Nenhum épico com dados suficientes para o Gantt.")
+            else:
+                # ─── KPIs dos Épicos ───
+                kc1, kc2, kc3, kc4 = st.columns(4)
+                kc1.metric("🏗️ Total de Épicos", len(epic_data))
+                avg_progress = sum(e["progress"] for e in epic_data) / len(epic_data)
+                kc2.metric("📊 Progresso Médio", f"{avg_progress:.0f}%")
+                completed_epics = sum(1 for e in epic_data if e["progress"] == 100)
+                kc3.metric("✅ Épicos Concluídos", completed_epics)
+                with_deps = sum(1 for e in epic_data if e["dependencies"])
+                kc4.metric("🔗 Com Dependências", with_deps)
+
+                st.markdown("---")
+
+                # ─── GANTT CHART ───
+                st.markdown("##### 📊 Timeline dos Épicos")
+
+                fig = go.Figure()
+
+                # Sort epics by start date
+                epic_data_sorted = sorted(epic_data, key=lambda x: x["start"], reverse=True)
+                y_labels = []
+
+                for i, epic in enumerate(epic_data_sorted):
+                    label = f"{epic['key']} — {epic['summary'][:40]}"
+                    y_labels.append(label)
+
+                    # Background bar (full duration)
+                    fig.add_trace(go.Bar(
+                        x=[(epic["end"] - epic["start"]).days],
+                        y=[label],
+                        orientation="h",
+                        base=epic["start"],
+                        marker=dict(color="rgba(148,163,184,0.15)", line=dict(color=epic["color"], width=1)),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
+
+                    # Progress bar (filled portion)
+                    progress_days = (epic["end"] - epic["start"]).days * (epic["progress"] / 100)
+                    if progress_days > 0:
+                        fig.add_trace(go.Bar(
+                            x=[progress_days],
+                            y=[label],
+                            orientation="h",
+                            base=epic["start"],
+                            marker=dict(color=epic["color"], opacity=0.7),
+                            showlegend=False,
+                            text=f"{epic['progress']:.0f}%",
+                            textposition="inside",
+                            textfont=dict(color="white", size=11, family="DM Sans"),
+                            hovertemplate=(
+                                f"<b>{epic['key']}</b> — {epic['summary'][:50]}<br>"
+                                f"Status: {epic['status']}<br>"
+                                f"Progresso: {epic['progress']:.0f}% ({epic['done_children']}/{epic['total_children']} tarefas)<br>"
+                                f"Início: {epic['start'].strftime('%d/%m/%Y')}<br>"
+                                f"Previsão: {epic['end'].strftime('%d/%m/%Y')}<br>"
+                                f"Responsável: {epic['assignee']}"
+                                "<extra></extra>"
+                            ),
+                        ))
+
+                # Today line
+                fig.add_vline(
+                    x=today, line_dash="dash", line_color="#ef4444", line_width=2,
+                    annotation_text="Hoje", annotation_position="top",
+                    annotation_font=dict(color="#ef4444", size=11),
+                )
+
+                fig.update_layout(
+                    height=max(200, len(epic_data_sorted) * 80 + 100),
+                    barmode="overlay",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="DM Sans"),
+                    xaxis=dict(
+                        type="date",
+                        gridcolor="rgba(148,163,184,0.1)",
+                        dtick="604800000",  # weekly ticks
+                        tickformat="%d/%m",
+                    ),
+                    yaxis=dict(autorange="reversed"),
+                    margin=dict(l=10, r=10, t=30, b=30),
+                    bargap=0.3,
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # ─── DEPENDENCIES ───
+                deps_exist = any(e["dependencies"] for e in epic_data)
+                if deps_exist:
+                    st.markdown("---")
+                    st.markdown("##### 🔗 Dependências entre Épicos")
+                    for epic in epic_data_sorted:
+                        if epic["dependencies"]:
+                            for dep in epic["dependencies"]:
+                                st.markdown(
+                                    f'<div style="background:rgba(30,41,59,0.6); border:1px solid rgba(148,163,184,0.1); '
+                                    f'border-radius:8px; padding:10px 14px; margin-bottom:8px; font-size:13px;">'
+                                    f'<span style="color:#60a5fa; font-weight:600;">{epic["key"]}</span>'
+                                    f' <span style="color:#94a3b8;">→ {dep["type"]} →</span> '
+                                    f'<span style="color:#f59e0b; font-weight:600;">{dep["target"]}</span>'
+                                    f' <span style="color:#cbd5e1;">{dep["target_summary"][:50]}</span>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                # ─── DETALHAMENTO POR ÉPICO ───
+                st.markdown("---")
+                st.markdown("##### 📋 Detalhamento por Épico")
+
+                for epic in epic_data_sorted:
+                    progress_color = epic["color"]
+                    with st.expander(
+                        f"{'●'} **{epic['key']}** — {epic['summary']} &nbsp;|&nbsp; "
+                        f"Progresso: {epic['progress']:.0f}% ({epic['done_children']}/{epic['total_children']}) &nbsp;|&nbsp; "
+                        f"Status: {epic['status']}",
+                        expanded=False,
+                    ):
+                        # Epic info
+                        ec1, ec2, ec3, ec4 = st.columns(4)
+                        ec1.metric("Início", epic["start"].strftime("%d/%m/%Y"))
+                        ec2.metric("Previsão", epic["end"].strftime("%d/%m/%Y"))
+                        days_remaining = (epic["end"] - today).days
+                        ec3.metric("Dias Restantes", f"{days_remaining}d" if days_remaining > 0 else "⚠️ Vencido")
+                        ec4.metric("Progresso", f"{epic['progress']:.0f}%")
+
+                        # Progress bar visual
+                        st.markdown(
+                            f'<div style="background:rgba(148,163,184,0.15); border-radius:8px; height:24px; '
+                            f'overflow:hidden; margin:10px 0;">'
+                            f'<div style="background:{progress_color}; width:{epic["progress"]}%; height:100%; '
+                            f'border-radius:8px; display:flex; align-items:center; justify-content:center; '
+                            f'font-size:11px; color:white; font-weight:600;">'
+                            f'{epic["progress"]:.0f}%</div></div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        # Children table
+                        children = epic["children"]
+                        if not children.empty:
+                            st.markdown("**Tarefas filhas:**")
+                            display_children = children[[
+                                "key", "summary", "status", "assignee", "type", "duedate", "resolved"
+                            ]].copy()
+                            display_children.columns = ["Key", "Resumo", "Status", "Responsável", "Tipo", "Due Date", "Resolvido"]
+                            st.dataframe(display_children, hide_index=True, use_container_width=True)
+                        else:
+                            st.info("Nenhuma tarefa filha vinculada a este épico.")
+
+                        # Dependencies for this epic
+                        if epic["dependencies"]:
+                            st.markdown("**Dependências:**")
+                            for dep in epic["dependencies"]:
+                                st.markdown(f"- {dep['type']} → **{dep['target']}** ({dep['target_summary'][:50]})")
 
     # ═══════════════════════════════════════
     # TAB 2 — FLUXO
