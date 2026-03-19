@@ -790,14 +790,64 @@ def main():
 
             st.markdown("---")
 
+            # ─── EXPAND / COLLAPSE CONTROLS ───
+            # Initialize session state for expanded epics
+            if "expanded_epics" not in st.session_state:
+                st.session_state["expanded_epics"] = set()
+
+            ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 4])
+            with ctrl1:
+                if st.button("➕ Expandir Todos", use_container_width=True, key="gantt_expand_all"):
+                    st.session_state["expanded_epics"] = {r["key"] for r in epic_rows}
+                    st.rerun()
+            with ctrl2:
+                if st.button("➖ Retrair Todos", use_container_width=True, key="gantt_collapse_all"):
+                    st.session_state["expanded_epics"] = set()
+                    st.rerun()
+
+            # Per-epic toggles
+            st.markdown("")
+            toggle_cols = st.columns(min(len(epic_rows), 4))
+            for i, ep in enumerate(epic_rows):
+                col_idx = i % min(len(epic_rows), 4)
+                is_expanded = ep["key"] in st.session_state["expanded_epics"]
+                icon = "▼" if is_expanded else "▶"
+                with toggle_cols[col_idx]:
+                    if st.button(
+                        f"{icon} {ep['key']}",
+                        key=f"toggle_{ep['key']}",
+                        use_container_width=True,
+                        help=ep["summary"],
+                    ):
+                        if is_expanded:
+                            st.session_state["expanded_epics"].discard(ep["key"])
+                        else:
+                            st.session_state["expanded_epics"].add(ep["key"])
+                        st.rerun()
+
+            st.markdown("")
+
+            # Filter timeline_rows: show all epics, show children only if epic is expanded
+            visible_rows = []
+            current_epic_key = None
+            for row in timeline_rows:
+                if row["is_epic"]:
+                    current_epic_key = row["key"]
+                    is_expanded = current_epic_key in st.session_state["expanded_epics"]
+                    # Update label icon
+                    icon = "▼" if is_expanded else "▶"
+                    row_copy = row.copy()
+                    row_copy["label"] = f"{icon} {row['key']} {row['summary'][:45]}"
+                    visible_rows.append(row_copy)
+                else:
+                    # Only show children if parent epic is expanded
+                    if current_epic_key in st.session_state["expanded_epics"]:
+                        visible_rows.append(row)
+
             # ─── GANTT CHART ───
             fig = go.Figure()
 
-            # Reverse to show first epic at top
-            y_labels = [r["label"] for r in timeline_rows]
-            y_labels_rev = list(reversed(y_labels))
-
-            for row in timeline_rows:
+            for row in visible_rows:
                 duration_days = (row["end"] - row["start"]).days
                 if duration_days <= 0:
                     duration_days = 1
@@ -872,7 +922,7 @@ def main():
             today_str = today.strftime("%Y-%m-%d")
             fig.add_shape(
                 type="line",
-                x0=today_str, x1=today_str, y0=-0.5, y1=len(timeline_rows) - 0.5,
+                x0=today_str, x1=today_str, y0=-0.5, y1=len(visible_rows) - 0.5,
                 xref="x", yref="y",
                 line=dict(color="#60a5fa", width=2, dash="dot"),
             )
@@ -883,18 +933,18 @@ def main():
                 font=dict(color="#60a5fa", size=10),
             )
 
-            # Dependency arrows
-            key_to_idx = {r["key"]: i for i, r in enumerate(timeline_rows)}
-            for row in timeline_rows:
+            # Dependency arrows (only between visible epics)
+            key_to_row = {r["key"]: r for r in visible_rows if r["is_epic"]}
+            for row in visible_rows:
                 if row["is_epic"] and row["dependencies"]:
                     for dep in row["dependencies"]:
                         target_key = dep["target"]
-                        if target_key in key_to_idx:
+                        if target_key in key_to_row:
                             fig.add_annotation(
                                 x=row["start"].strftime("%Y-%m-%d"),
                                 y=row["label"],
-                                ax=timeline_rows[key_to_idx[target_key]]["end"].strftime("%Y-%m-%d"),
-                                ay=timeline_rows[key_to_idx[target_key]]["label"],
+                                ax=key_to_row[target_key]["end"].strftime("%Y-%m-%d"),
+                                ay=key_to_row[target_key]["label"],
                                 xref="x", yref="y", axref="x", ayref="y",
                                 showarrow=True,
                                 arrowhead=3, arrowsize=1.2, arrowwidth=1.5,
@@ -904,7 +954,7 @@ def main():
 
             # Layout
             fig.update_layout(
-                height=max(350, len(timeline_rows) * 42 + 100),
+                height=max(350, len(visible_rows) * 42 + 100),
                 barmode="overlay",
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
