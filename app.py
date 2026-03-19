@@ -313,7 +313,7 @@ def main():
 
     # ─── TABS ───
     tab1, tab_plan, tab_gantt, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Visão Geral", "🎯 Planejados x Entregues", "📅 Gantt Épicos",
+        "📈 Visão Geral", "🎯 Planejados x Entregues", "📅 Timeline",
         "🔄 Fluxo", "👤 Pessoas", "🚨 Alertas", "📋 Todos os Itens"
     ])
 
@@ -636,8 +636,8 @@ def main():
     # TAB GANTT — TIMELINE ÉPICOS
     # ═══════════════════════════════════════
     with tab_gantt:
-        st.markdown("#### 📅 Timeline de Épicos — Visão Hierárquica")
-        st.caption("Épicos e suas tarefas filhas com barras de progresso. Cores indicam risco: 🟢 No prazo · 🟡 Risco de atraso (>75% do tempo, <75% progresso) · 🔴 Atrasado (passou da due date)")
+        st.markdown("#### 📅 Timeline — Épicos e Tarefas")
+        st.caption("Visão hierárquica com barras no estilo Jira. Cada épico tem sua cor, filhas herdam a cor do pai. Muda para 🟡 amarelo (risco) ou 🔴 vermelho (atrasado).")
 
         epics = df[df["type"] == "Epic"].copy()
 
@@ -649,14 +649,32 @@ def main():
             # ─── Build hierarchical data: Epic → Children ───
             timeline_rows = []
 
-            # Sort epics by created date
+            # Jira-style color palette — each epic gets its own color
+            EPIC_PALETTE = [
+                "#a855f7",  # Purple (like Jira)
+                "#10b981",  # Green/Teal
+                "#3b82f6",  # Blue
+                "#f59e0b",  # Amber
+                "#ec4899",  # Pink
+                "#06b6d4",  # Cyan
+                "#8b5cf6",  # Violet
+                "#f97316",  # Orange
+            ]
+
+            # Risk override colors
+            COLOR_OVERDUE = "#ef4444"
+            COLOR_AT_RISK = "#f59e0b"
+
             epics_sorted = epics.sort_values("created_dt")
 
-            for _, epic in epics_sorted.iterrows():
+            for epic_idx, (_, epic) in enumerate(epics_sorted.iterrows()):
                 children = df[df["parent_key"] == epic["key"]].copy()
                 total_children = len(children)
                 done_children = len(children[children["status"] == "Done"])
                 progress = (done_children / total_children * 100) if total_children > 0 else 0
+
+                # Epic theme color (cycles through palette)
+                theme_color = EPIC_PALETTE[epic_idx % len(EPIC_PALETTE)]
 
                 # Dates
                 start = epic["created_dt"]
@@ -672,25 +690,25 @@ def main():
                 if end <= start:
                     end = start + pd.Timedelta(days=14)
 
-                # Risk classification
+                # Risk classification (determines if we override the theme color)
                 elapsed_ratio = max(0, (today - start).days) / max(1, (end - start).days)
                 progress_ratio = progress / 100
 
                 if today > end and progress < 100:
                     risk = "overdue"
-                    bar_color = "#ef4444"      # Red
+                    bar_color = COLOR_OVERDUE
                     risk_label = "🔴 Atrasado"
                 elif elapsed_ratio > 0.75 and progress_ratio < 0.75:
                     risk = "at_risk"
-                    bar_color = "#f59e0b"      # Yellow
+                    bar_color = COLOR_AT_RISK
                     risk_label = "🟡 Risco"
                 elif progress == 100:
                     risk = "done"
-                    bar_color = "#10b981"      # Green
+                    bar_color = theme_color
                     risk_label = "🟢 Concluído"
                 else:
                     risk = "on_track"
-                    bar_color = "#10b981"      # Green
+                    bar_color = theme_color
                     risk_label = "🟢 No prazo"
 
                 # Dependencies
@@ -716,7 +734,7 @@ def main():
                     "status": epic["status"],
                     "assignee": epic["assignee"],
                     "bar_color": bar_color,
-                    "bg_color": bar_color,
+                    "theme_color": theme_color,
                     "risk": risk,
                     "risk_label": risk_label,
                     "is_epic": True,
@@ -725,7 +743,7 @@ def main():
                     "dependencies": deps,
                 })
 
-                # Add CHILDREN rows (indented)
+                # Add CHILDREN rows — inherit epic's theme color
                 for _, child in children.sort_values("created_dt").iterrows():
                     c_start = child["created_dt"]
                     c_end = child["duedate_dt"] if pd.notna(child.get("duedate_dt")) else None
@@ -736,26 +754,25 @@ def main():
                     if pd.isna(c_end) or c_end <= c_start:
                         c_end = c_start + pd.Timedelta(days=7)
 
-                    # Child risk
+                    # Child uses epic's theme color, unless at risk/overdue
                     if child["status"] == "Done":
-                        c_color = "#10b981"
+                        c_color = theme_color
                         c_risk = "🟢"
                     elif pd.notna(child.get("duedate_dt")) and today > child["duedate_dt"]:
-                        c_color = "#ef4444"
+                        c_color = COLOR_OVERDUE
                         c_risk = "🔴"
                     elif child["status"] in ["Bloqueado", "BUGS"]:
-                        c_color = "#ef4444"
+                        c_color = COLOR_OVERDUE
                         c_risk = "🔴"
                     else:
                         c_elapsed = max(0, (today - c_start).days) / max(1, (c_end - c_start).days)
-                        if c_elapsed > 0.85 and child["status"] != "Done":
-                            c_color = "#f59e0b"
+                        if c_elapsed > 0.85:
+                            c_color = COLOR_AT_RISK
                             c_risk = "🟡"
                         else:
-                            c_color = "#8b5cf6"
+                            c_color = theme_color
                             c_risk = "🟢"
 
-                    # Status badge text
                     status_short = child["status"][:12]
 
                     timeline_rows.append({
@@ -768,7 +785,7 @@ def main():
                         "status": child["status"],
                         "assignee": child["assignee"],
                         "bar_color": c_color,
-                        "bg_color": c_color,
+                        "theme_color": theme_color,
                         "risk": c_risk,
                         "risk_label": f"{c_risk} {status_short}",
                         "is_epic": False,
@@ -791,7 +808,6 @@ def main():
             st.markdown("---")
 
             # ─── EXPAND / COLLAPSE CONTROLS ───
-            # Initialize session state for expanded epics
             if "expanded_epics" not in st.session_state:
                 st.session_state["expanded_epics"] = set()
 
@@ -827,164 +843,173 @@ def main():
 
             st.markdown("")
 
-            # Filter timeline_rows: show all epics, show children only if epic is expanded
+            # Filter visible rows based on expand/collapse state
             visible_rows = []
             current_epic_key = None
             for row in timeline_rows:
                 if row["is_epic"]:
                     current_epic_key = row["key"]
                     is_expanded = current_epic_key in st.session_state["expanded_epics"]
-                    # Update label icon
                     icon = "▼" if is_expanded else "▶"
                     row_copy = row.copy()
                     row_copy["label"] = f"{icon} {row['key']} {row['summary'][:45]}"
                     visible_rows.append(row_copy)
                 else:
-                    # Only show children if parent epic is expanded
                     if current_epic_key in st.session_state["expanded_epics"]:
                         visible_rows.append(row)
 
-            # ─── GANTT CHART ───
-            fig = go.Figure()
-
+            # ─── TIMELINE CHART (Jira-style) ───
+            # Build DataFrame for px.timeline
+            chart_data = []
             for row in visible_rows:
-                duration_days = (row["end"] - row["start"]).days
-                if duration_days <= 0:
-                    duration_days = 1
+                chart_data.append({
+                    "Task": row["label"],
+                    "Start": row["start"],
+                    "Finish": row["end"],
+                    "Color": row["bar_color"],
+                    "Epic": row["is_epic"],
+                    "Key": row["key"],
+                    "Status": row["status"],
+                    "Progress": row["progress"],
+                    "Risk": row["risk_label"],
+                    "Assignee": row["assignee"],
+                    "Summary": row["summary"],
+                    "Children": f"{row['done_children']}/{row['total_children']}" if row["is_epic"] else "",
+                })
 
-                is_epic = row["is_epic"]
-                bar_height = 0.6 if is_epic else 0.4
-                opacity = 0.85 if is_epic else 0.7
+            chart_df = pd.DataFrame(chart_data)
 
-                # Background bar (full duration, semi-transparent)
-                fig.add_trace(go.Bar(
-                    x=[duration_days],
-                    y=[row["label"]],
-                    orientation="h",
-                    base=row["start"],
-                    marker=dict(
-                        color=row["bar_color"],
-                        opacity=opacity,
-                        line=dict(width=0),
-                    ),
-                    width=bar_height,
-                    showlegend=False,
+            if not chart_df.empty:
+                fig = px.timeline(
+                    chart_df,
+                    x_start="Start",
+                    x_end="Finish",
+                    y="Task",
+                    color="Task",
+                    color_discrete_map={row["Task"]: row["Color"] for _, row in chart_df.iterrows()},
+                    custom_data=["Key", "Status", "Progress", "Risk", "Assignee", "Summary", "Children"],
+                )
+
+                # Style the bars
+                fig.update_traces(
+                    marker_line_width=0,
+                    opacity=0.9,
                     hovertemplate=(
-                        f"<b>{row['key']}</b> — {row['summary'][:50]}<br>"
-                        f"Status: {row['status']}<br>"
-                        f"{'Progresso: ' + str(round(row['progress'])) + '% (' + str(row['done_children']) + '/' + str(row['total_children']) + ' tarefas)<br>' if is_epic else ''}"
-                        f"Início: {row['start'].strftime('%d/%m/%Y')}<br>"
-                        f"Previsão: {row['end'].strftime('%d/%m/%Y')}<br>"
-                        f"Responsável: {row['assignee']}<br>"
-                        f"Risco: {row['risk_label']}"
+                        "<b>%{customdata[0]}</b> — %{customdata[5]}<br>"
+                        "Status: %{customdata[1]}<br>"
+                        "Progresso: %{customdata[2]:.0f}% (%{customdata[6]})<br>"
+                        "Início: %{base|%d/%m/%Y}<br>"
+                        "Previsão: %{x|%d/%m/%Y}<br>"
+                        "Responsável: %{customdata[4]}<br>"
+                        "Risco: %{customdata[3]}"
                         "<extra></extra>"
                     ),
-                ))
+                )
 
-                # For epics: add progress overlay
-                if is_epic and row["progress"] > 0 and row["progress"] < 100:
-                    progress_days = duration_days * (row["progress"] / 100)
-                    fig.add_trace(go.Bar(
-                        x=[progress_days],
-                        y=[row["label"]],
-                        orientation="h",
-                        base=row["start"],
-                        marker=dict(color=row["bar_color"], opacity=1.0, line=dict(width=0)),
-                        width=bar_height,
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ))
+                # Make epic bars thicker, children thinner
+                for trace in fig.data:
+                    task_name = trace.name
+                    matching = chart_df[chart_df["Task"] == task_name]
+                    if not matching.empty and matching.iloc[0]["Epic"]:
+                        trace.width = 0.7
+                    else:
+                        trace.width = 0.45
 
-                # Add percentage text for epics
-                if is_epic:
-                    mid_date = row["start"] + pd.Timedelta(days=duration_days / 2)
-                    fig.add_annotation(
-                        x=mid_date.strftime("%Y-%m-%d"),
-                        y=row["label"],
-                        text=f"<b>{row['progress']:.0f}%</b>",
-                        showarrow=False,
-                        font=dict(color="white", size=11, family="DM Sans"),
-                    )
+                # Today line
+                today_str = today.strftime("%Y-%m-%d")
+                fig.add_shape(
+                    type="line",
+                    x0=today_str, x1=today_str, y0=-0.5, y1=len(visible_rows) - 0.5,
+                    xref="x", yref="y",
+                    line=dict(color="#60a5fa", width=2, dash="dot"),
+                )
+                fig.add_annotation(
+                    x=today_str, y=-0.8, yref="y",
+                    text=f"<b>Hoje ({today.strftime('%d/%m')})</b>",
+                    showarrow=False,
+                    font=dict(color="#60a5fa", size=10),
+                )
 
-                # Add status badge for children
-                if not is_epic:
-                    badge_date = row["end"] + pd.Timedelta(days=1)
-                    fig.add_annotation(
-                        x=badge_date.strftime("%Y-%m-%d"),
-                        y=row["label"],
-                        text=f" {row['status']}",
-                        showarrow=False,
-                        font=dict(color=row["bar_color"], size=9, family="DM Sans"),
-                        xanchor="left",
-                    )
+                # Add progress % annotations on epic bars
+                for row in visible_rows:
+                    if row["is_epic"]:
+                        duration = (row["end"] - row["start"]).days
+                        mid = row["start"] + pd.Timedelta(days=max(1, duration) / 2)
+                        fig.add_annotation(
+                            x=mid.strftime("%Y-%m-%d"),
+                            y=row["label"],
+                            text=f"<b>{row['progress']:.0f}%</b>",
+                            showarrow=False,
+                            font=dict(color="white", size=11, family="DM Sans"),
+                        )
 
-            # Today line
-            today_str = today.strftime("%Y-%m-%d")
-            fig.add_shape(
-                type="line",
-                x0=today_str, x1=today_str, y0=-0.5, y1=len(visible_rows) - 0.5,
-                xref="x", yref="y",
-                line=dict(color="#60a5fa", width=2, dash="dot"),
-            )
-            fig.add_annotation(
-                x=today_str, y=-0.8, yref="y",
-                text=f"<b>Hoje ({today.strftime('%d/%m')})</b>",
-                showarrow=False,
-                font=dict(color="#60a5fa", size=10),
-            )
+                # Status badges after child bars
+                for row in visible_rows:
+                    if not row["is_epic"]:
+                        badge_x = row["end"] + pd.Timedelta(days=1)
+                        badge_text = row["status"]
+                        fig.add_annotation(
+                            x=badge_x.strftime("%Y-%m-%d"),
+                            y=row["label"],
+                            text=f"<b>{badge_text}</b>",
+                            showarrow=False,
+                            font=dict(color=row["bar_color"], size=9, family="DM Sans"),
+                            xanchor="left",
+                        )
 
-            # Dependency arrows (only between visible epics)
-            key_to_row = {r["key"]: r for r in visible_rows if r["is_epic"]}
-            for row in visible_rows:
-                if row["is_epic"] and row["dependencies"]:
-                    for dep in row["dependencies"]:
-                        target_key = dep["target"]
-                        if target_key in key_to_row:
-                            fig.add_annotation(
-                                x=row["start"].strftime("%Y-%m-%d"),
-                                y=row["label"],
-                                ax=key_to_row[target_key]["end"].strftime("%Y-%m-%d"),
-                                ay=key_to_row[target_key]["label"],
-                                xref="x", yref="y", axref="x", ayref="y",
-                                showarrow=True,
-                                arrowhead=3, arrowsize=1.2, arrowwidth=1.5,
-                                arrowcolor="#f59e0b",
-                                opacity=0.7,
-                            )
+                # Dependency arrows
+                key_to_row = {r["key"]: r for r in visible_rows if r["is_epic"]}
+                for row in visible_rows:
+                    if row["is_epic"] and row.get("dependencies"):
+                        for dep in row["dependencies"]:
+                            target_key = dep["target"]
+                            if target_key in key_to_row:
+                                fig.add_annotation(
+                                    x=row["start"].strftime("%Y-%m-%d"),
+                                    y=row["label"],
+                                    ax=key_to_row[target_key]["end"].strftime("%Y-%m-%d"),
+                                    ay=key_to_row[target_key]["label"],
+                                    xref="x", yref="y", axref="x", ayref="y",
+                                    showarrow=True,
+                                    arrowhead=3, arrowsize=1.2, arrowwidth=1.5,
+                                    arrowcolor="#f59e0b",
+                                    opacity=0.7,
+                                )
 
-            # Layout
-            fig.update_layout(
-                height=max(350, len(visible_rows) * 42 + 100),
-                barmode="overlay",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="DM Sans", size=11),
-                xaxis=dict(
-                    type="date",
-                    gridcolor="rgba(148,163,184,0.08)",
-                    dtick="604800000",
-                    tickformat="%d/%m",
-                    side="top",
-                    showline=False,
-                ),
-                yaxis=dict(
-                    autorange="reversed",
-                    showgrid=False,
-                    tickfont=dict(size=11),
-                ),
-                margin=dict(l=10, r=80, t=40, b=20),
-                bargap=0.15,
-            )
+                # Layout — Jira-style
+                fig.update_layout(
+                    height=max(350, len(visible_rows) * 46 + 100),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="DM Sans", size=11),
+                    showlegend=False,
+                    xaxis=dict(
+                        type="date",
+                        gridcolor="rgba(148,163,184,0.08)",
+                        dtick="604800000",
+                        tickformat="%d/%m",
+                        side="top",
+                        showline=False,
+                        tickfont=dict(size=10, color="#94a3b8"),
+                    ),
+                    yaxis=dict(
+                        autorange="reversed",
+                        showgrid=False,
+                        tickfont=dict(size=11),
+                        showline=False,
+                    ),
+                    margin=dict(l=10, r=100, t=40, b=20),
+                    bargap=0.2,
+                )
 
-            st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True)
 
             # ─── LEGENDA ───
             st.markdown(
-                '<div style="display:flex; gap:24px; justify-content:center; font-size:12px; margin-top:-10px;">'
-                '<span><span style="color:#10b981;">●</span> No prazo / Concluído</span>'
-                '<span><span style="color:#f59e0b;">●</span> Risco de atraso</span>'
-                '<span><span style="color:#ef4444;">●</span> Atrasado</span>'
-                '<span><span style="color:#8b5cf6;">●</span> Tarefa em andamento</span>'
+                '<div style="display:flex; gap:20px; justify-content:center; font-size:12px; margin-top:-10px; flex-wrap:wrap;">'
+                '<span><span style="color:#a855f7;">████</span> Épico (cor única)</span>'
+                '<span><span style="color:#f59e0b;">████</span> Risco de atraso</span>'
+                '<span><span style="color:#ef4444;">████</span> Atrasado</span>'
                 '<span style="color:#60a5fa;">┆ Hoje</span>'
                 '</div>',
                 unsafe_allow_html=True,
