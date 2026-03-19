@@ -771,11 +771,18 @@ def main():
                             ),
                         ))
 
-                # Today line
-                fig.add_vline(
-                    x=today, line_dash="dash", line_color="#ef4444", line_width=2,
-                    annotation_text="Hoje", annotation_position="top",
-                    annotation_font=dict(color="#ef4444", size=11),
+                # Today line (using shape + annotation to avoid Timestamp math issue)
+                today_str = today.strftime("%Y-%m-%d")
+                fig.add_shape(
+                    type="line",
+                    x0=today_str, x1=today_str, y0=0, y1=1,
+                    xref="x", yref="paper",
+                    line=dict(color="#ef4444", width=2, dash="dash"),
+                )
+                fig.add_annotation(
+                    x=today_str, y=1.05, yref="paper",
+                    text="Hoje", showarrow=False,
+                    font=dict(color="#ef4444", size=11),
                 )
 
                 fig.update_layout(
