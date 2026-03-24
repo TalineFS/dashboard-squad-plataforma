@@ -67,7 +67,8 @@ def fetch_jira_issues():
             "fields": [
                 "summary", "status", "issuetype", "priority", "assignee",
                 "created", "resolutiondate", "updated", "resolution", "labels",
-                "duedate", "parent", "issuelinks"
+                "duedate", "parent", "issuelinks",
+                "customfield_10014", "customfield_10008", "customfield_10100"
             ],
         }
         if next_page_token:
@@ -109,6 +110,7 @@ def fetch_jira_issues():
                 "duedate": f.get("duedate", None),
                 "parent_key": f.get("parent", {}).get("key", None) if f.get("parent") else None,
                 "parent_summary": f.get("parent", {}).get("fields", {}).get("summary", None) if f.get("parent") else None,
+                "epic_link": f.get("customfield_10014", None),
                 "links": [
                     {
                         "type": link.get("type", {}).get("name", ""),
@@ -136,6 +138,15 @@ def fetch_jira_issues():
         df["updated_dt"] = pd.to_datetime(df["updated"])
         df["duedate_dt"] = pd.to_datetime(df["duedate"])
         df["lead_days"] = (df["resolved_dt"] - df["created_dt"]).dt.days
+
+        # Build effective_epic: uses parent_key if parent is an Epic, otherwise uses epic_link
+        epic_keys = set(df[df["type"] == "Epic"]["key"].tolist())
+        df["effective_epic"] = df.apply(
+            lambda r: r["parent_key"] if r.get("parent_key") in epic_keys
+            else r.get("epic_link") if r.get("epic_link") in epic_keys
+            else r.get("parent_key"),
+            axis=1,
+        )
     return df
 
 
@@ -668,7 +679,7 @@ def main():
             epics_sorted = epics.sort_values("created_dt")
 
             for epic_idx, (_, epic) in enumerate(epics_sorted.iterrows()):
-                children = df[df["parent_key"] == epic["key"]].copy()
+                children = df[df["effective_epic"] == epic["key"]].copy()
                 total_children = len(children)
                 done_children = len(children[children["status"] == "Done"])
                 progress = (done_children / total_children * 100) if total_children > 0 else 0
@@ -1042,7 +1053,7 @@ def main():
                 if not row["is_epic"]:
                     continue
 
-                children_df = df[df["parent_key"] == row["key"]]
+                children_df = df[df["effective_epic"] == row["key"]]
                 days_remaining = (row["end"] - today).days
 
                 with st.expander(
