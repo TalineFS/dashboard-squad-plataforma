@@ -26,8 +26,8 @@ TEAM = {
     "hgp": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
     "gfm": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
     "Leonardo Almeida": {"name": "Leonardo", "role": "QA Automação", "color": "#10b981"},
-    "Marcelo Oliveira": {"name": "Marcelo", "role": "Eng. Backend", "color": "#ef4444"},
-    "ats": {"name": "Sato", "role": "Eng. Mobile", "color": "#ec4899"},
+    "Marcelo Oliveira": {"name": "Marcelo", "role": "Arquiteto Backend", "color": "#ef4444"},
+    "ats": {"name": "Sato", "role": "Arquiteto Mobile", "color": "#ec4899"},
     "Ricardo Moro": {"name": "Ricardo", "role": "Ger. Arquitetura", "color": "#8b5cf6"},
 }
 
