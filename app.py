@@ -26,8 +26,8 @@ TEAM = {
     "hgp": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
     "gfm": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
     "Leonardo Almeida": {"name": "Leonardo", "role": "QA Automação", "color": "#10b981"},
-    "Marcelo Oliveira": {"name": "Marcelo", "role": "Arquiteto Backend", "color": "#ef4444"},
-    "ats": {"name": "Sato", "role": "Arquiteto Mobile", "color": "#ec4899"},
+    "Marcelo Oliveira": {"name": "Marcelo", "role": "Eng. Backend", "color": "#ef4444"},
+    "ats": {"name": "Sato", "role": "Eng. Mobile", "color": "#ec4899"},
     "Ricardo Moro": {"name": "Ricardo", "role": "Ger. Arquitetura", "color": "#8b5cf6"},
 }
 
@@ -1091,6 +1091,78 @@ def main():
                         st.markdown("**Dependências:**")
                         for dep in row["dependencies"]:
                             st.markdown(f"- {dep['type']} → **{dep['target']}** ({dep['target_summary'][:50]})")
+
+            # ─── DIAGNÓSTICO DE VÍNCULOS ───
+            st.markdown("---")
+            with st.expander("🔍 Diagnóstico de Vínculos — Por que alguns épicos não mostram progresso?", expanded=False):
+                st.markdown(
+                    "Esta seção mostra como o dashboard encontra as tarefas de cada épico. "
+                    "Existem **duas formas** de vincular uma tarefa a um épico no Jira:"
+                )
+                st.markdown(
+                    '1. **Campo `parent`** — quando a task/story foi criada **dentro** do épico (hierarquia nativa)\n'
+                    '2. **Campo `Epic Link`** — quando o épico foi selecionado no campo "Epic Link" da issue (forma clássica)'
+                )
+                st.markdown("O dashboard verifica ambos os campos. Se nenhum dos dois aponta para um épico, a tarefa fica **órfã**.")
+
+                st.markdown("---")
+
+                # Show per-epic breakdown
+                non_epics = df[df["type"] != "Epic"]
+                epic_keys_set = set(epics["key"].tolist())
+
+                for _, epic in epics_sorted.iterrows():
+                    via_parent = non_epics[non_epics["parent_key"] == epic["key"]]
+                    via_epic_link = non_epics[non_epics["epic_link"] == epic["key"]]
+                    via_effective = non_epics[non_epics["effective_epic"] == epic["key"]]
+
+                    total = len(via_effective)
+                    done = len(via_effective[via_effective["status"] == "Done"])
+                    pct = f"{done/total*100:.0f}%" if total > 0 else "—"
+
+                    color = "🟢" if total > 0 else "🔴"
+                    st.markdown(
+                        f"**{color} {epic['key']} — {epic['summary']}** &nbsp;|&nbsp; "
+                        f"Filhas encontradas: **{total}** (Done: {done}) → Progresso: **{pct}**"
+                    )
+
+                    if total > 0:
+                        detail_data = []
+                        for _, child in via_effective.iterrows():
+                            found_via = []
+                            if child.get("parent_key") == epic["key"]:
+                                found_via.append("✅ parent")
+                            if child.get("epic_link") == epic["key"]:
+                                found_via.append("✅ Epic Link")
+                            detail_data.append({
+                                "Key": child["key"],
+                                "Resumo": child["summary"][:50],
+                                "Status": child["status"],
+                                "Vínculo via": " + ".join(found_via) if found_via else "❓",
+                                "parent_key": child.get("parent_key", "—") or "—",
+                                "epic_link": child.get("epic_link", "—") or "—",
+                            })
+                        st.dataframe(pd.DataFrame(detail_data), hide_index=True, use_container_width=True)
+                    else:
+                        st.caption("⚠️ Nenhuma tarefa vinculada. Verifique no Jira se as tasks têm o campo 'Parent' ou 'Epic Link' apontando para este épico.")
+
+                # Orphan tasks
+                st.markdown("---")
+                st.markdown("##### 👻 Tarefas Órfãs (sem vínculo com nenhum épico)")
+                orphans = non_epics[
+                    (~non_epics["effective_epic"].isin(epic_keys_set)) |
+                    (non_epics["effective_epic"].isna())
+                ]
+                if not orphans.empty:
+                    orphan_data = orphans[["key", "summary", "status", "type", "assignee", "parent_key", "epic_link"]].copy()
+                    orphan_data.columns = ["Key", "Resumo", "Status", "Tipo", "Responsável", "parent_key", "epic_link"]
+                    st.dataframe(orphan_data, hide_index=True, use_container_width=True)
+                    st.caption(
+                        "Estas tarefas não aparecem em nenhum épico na Timeline. "
+                        "Para corrigir, abra cada uma no Jira e preencha o campo **Epic Link** ou mova como filha de um épico."
+                    )
+                else:
+                    st.success("Todas as tarefas estão vinculadas a um épico!")
 
     # ═══════════════════════════════════════
     # TAB 2 — FLUXO
