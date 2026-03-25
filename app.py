@@ -679,10 +679,39 @@ def main():
             epics_sorted = epics.sort_values("created_dt")
 
             for epic_idx, (_, epic) in enumerate(epics_sorted.iterrows()):
+                # Direct children of the epic (tasks/stories linked to this epic)
                 children = df[df["effective_epic"] == epic["key"]].copy()
                 total_children = len(children)
                 done_children = len(children[children["status"] == "Done"])
-                progress = (done_children / total_children * 100) if total_children > 0 else 0
+
+                # ─── Multi-level progress calculation ───
+                # For each direct child:
+                #   - If it has subtasks: its progress = done_subtasks / total_subtasks
+                #   - If it has no subtasks: its progress = 1.0 if Done, 0.0 otherwise
+                # Also collect ALL descendants (children + their subtasks) for display
+                all_descendants = children.copy()
+                progress_contributions = []
+
+                for _, child in children.iterrows():
+                    subtasks = df[df["parent_key"] == child["key"]]
+                    if not subtasks.empty:
+                        # Child has subtasks — calculate progress from them
+                        all_descendants = pd.concat([all_descendants, subtasks], ignore_index=True)
+                        sub_done = len(subtasks[subtasks["status"] == "Done"])
+                        sub_total = len(subtasks)
+                        progress_contributions.append(sub_done / sub_total)
+                    else:
+                        # No subtasks — binary: Done = 1.0, else 0.0
+                        progress_contributions.append(1.0 if child["status"] == "Done" else 0.0)
+
+                if progress_contributions:
+                    progress = (sum(progress_contributions) / len(progress_contributions)) * 100
+                else:
+                    progress = 0
+
+                # Also count total work items for display
+                total_all = len(all_descendants)
+                done_all = len(all_descendants[all_descendants["status"] == "Done"])
 
                 # Epic theme color (cycles through palette)
                 theme_color = EPIC_PALETTE[epic_idx % len(EPIC_PALETTE)]
@@ -749,13 +778,14 @@ def main():
                     "risk": risk,
                     "risk_label": risk_label,
                     "is_epic": True,
-                    "total_children": total_children,
-                    "done_children": done_children,
+                    "total_children": total_all,
+                    "done_children": done_all,
                     "dependencies": deps,
                 })
 
-                # Add CHILDREN rows — inherit epic's theme color
-                for _, child in children.sort_values("created_dt").iterrows():
+                # Add CHILDREN rows — include direct children AND their subtasks
+                direct_child_keys = set(children["key"].tolist())
+                for _, child in all_descendants.sort_values("created_dt").iterrows():
                     c_start = child["created_dt"]
                     c_end = child["duedate_dt"] if pd.notna(child.get("duedate_dt")) else None
 
@@ -786,9 +816,16 @@ def main():
 
                     status_short = child["status"][:12]
 
+                    # Determine indentation level
+                    is_direct_child = child["key"] in direct_child_keys
+                    if is_direct_child:
+                        label = f"  ↳ {child['key']} {child['summary'][:38]}"
+                    else:
+                        label = f"      ↳ {child['key']} {child['summary'][:34]}"
+
                     timeline_rows.append({
                         "key": child["key"],
-                        "label": f"    ↳ {child['key']} {child['summary'][:38]}",
+                        "label": label,
                         "summary": child["summary"],
                         "start": c_start,
                         "end": c_end,
@@ -1053,7 +1090,10 @@ def main():
                 if not row["is_epic"]:
                     continue
 
-                children_df = df[df["effective_epic"] == row["key"]]
+                # Get all descendants (children + their subtasks)
+                direct_children = df[df["effective_epic"] == row["key"]]
+                subtasks_of_children = df[df["parent_key"].isin(direct_children["key"])]
+                children_df = pd.concat([direct_children, subtasks_of_children], ignore_index=True).drop_duplicates(subset="key")
                 days_remaining = (row["end"] - today).days
 
                 with st.expander(
@@ -1096,49 +1136,71 @@ def main():
             st.markdown("---")
             with st.expander("🔍 Diagnóstico de Vínculos — Por que alguns épicos não mostram progresso?", expanded=False):
                 st.markdown(
-                    "Esta seção mostra como o dashboard encontra as tarefas de cada épico. "
-                    "Existem **duas formas** de vincular uma tarefa a um épico no Jira:"
+                    "O dashboard calcula progresso em **3 níveis**: Épico → Task/Story → Subtask. "
+                    "Se uma Task tem subtasks, o progresso dela é calculado pela % de subtasks concluídas."
                 )
                 st.markdown(
-                    '1. **Campo `parent`** — quando a task/story foi criada **dentro** do épico (hierarquia nativa)\n'
-                    '2. **Campo `Epic Link`** — quando o épico foi selecionado no campo "Epic Link" da issue (forma clássica)'
+                    '**Formas de vínculo:**\n'
+                    '1. **Campo `parent`** — quando a task foi criada **dentro** do épico (hierarquia nativa)\n'
+                    '2. **Campo `Epic Link`** — quando o épico foi selecionado no campo "Epic Link" da issue\n'
+                    '3. **Subtasks** — são detectadas pelo campo `parent` apontando para uma task filha do épico'
                 )
-                st.markdown("O dashboard verifica ambos os campos. Se nenhum dos dois aponta para um épico, a tarefa fica **órfã**.")
 
                 st.markdown("---")
 
-                # Show per-epic breakdown
                 non_epics = df[df["type"] != "Epic"]
                 epic_keys_set = set(epics["key"].tolist())
 
-                for _, epic in epics_sorted.iterrows():
-                    via_parent = non_epics[non_epics["parent_key"] == epic["key"]]
-                    via_epic_link = non_epics[non_epics["epic_link"] == epic["key"]]
-                    via_effective = non_epics[non_epics["effective_epic"] == epic["key"]]
+                for _, epic_row in epics_sorted.iterrows():
+                    # Direct children
+                    direct = non_epics[non_epics["effective_epic"] == epic_row["key"]]
+                    # Subtasks of direct children
+                    subs = df[df["parent_key"].isin(direct["key"])]
+                    all_desc = pd.concat([direct, subs], ignore_index=True).drop_duplicates(subset="key")
 
-                    total = len(via_effective)
-                    done = len(via_effective[via_effective["status"] == "Done"])
-                    pct = f"{done/total*100:.0f}%" if total > 0 else "—"
+                    total = len(all_desc)
+                    done = len(all_desc[all_desc["status"] == "Done"])
+
+                    # Recalculate weighted progress
+                    progress_parts = []
+                    for _, ch in direct.iterrows():
+                        ch_subs = df[df["parent_key"] == ch["key"]]
+                        if not ch_subs.empty:
+                            sub_done = len(ch_subs[ch_subs["status"] == "Done"])
+                            progress_parts.append(f"{ch['key']}={sub_done}/{len(ch_subs)} subtasks")
+                        else:
+                            progress_parts.append(f"{ch['key']}={'Done ✅' if ch['status'] == 'Done' else ch['status']}")
 
                     color = "🟢" if total > 0 else "🔴"
                     st.markdown(
-                        f"**{color} {epic['key']} — {epic['summary']}** &nbsp;|&nbsp; "
-                        f"Filhas encontradas: **{total}** (Done: {done}) → Progresso: **{pct}**"
+                        f"**{color} {epic_row['key']} — {epic_row['summary']}** &nbsp;|&nbsp; "
+                        f"Descendentes: **{total}** (diretos: {len(direct)}, subtasks: {len(subs)}, Done: {done})"
                     )
+
+                    if progress_parts:
+                        st.caption("Cálculo: " + " | ".join(progress_parts))
 
                     if total > 0:
                         detail_data = []
-                        for _, child in via_effective.iterrows():
+                        for _, child in all_desc.iterrows():
+                            # Determine level
+                            is_direct = child["key"] in set(direct["key"])
                             found_via = []
-                            if child.get("parent_key") == epic["key"]:
-                                found_via.append("✅ parent")
-                            if child.get("epic_link") == epic["key"]:
-                                found_via.append("✅ Epic Link")
+                            if is_direct:
+                                if child.get("parent_key") == epic_row["key"]:
+                                    found_via.append("✅ parent → Epic")
+                                if child.get("epic_link") == epic_row["key"]:
+                                    found_via.append("✅ Epic Link")
+                            else:
+                                found_via.append(f"✅ subtask de {child.get('parent_key', '?')}")
+
                             detail_data.append({
                                 "Key": child["key"],
                                 "Resumo": child["summary"][:50],
+                                "Tipo": child.get("type", "?"),
                                 "Status": child["status"],
-                                "Vínculo via": " + ".join(found_via) if found_via else "❓",
+                                "Nível": "📋 Direto" if is_direct else "📎 Subtask",
+                                "Vínculo": " + ".join(found_via) if found_via else "❓",
                                 "parent_key": child.get("parent_key", "—") or "—",
                                 "epic_link": child.get("epic_link", "—") or "—",
                             })
@@ -1149,10 +1211,11 @@ def main():
                 # Orphan tasks
                 st.markdown("---")
                 st.markdown("##### 👻 Tarefas Órfãs (sem vínculo com nenhum épico)")
-                orphans = non_epics[
-                    (~non_epics["effective_epic"].isin(epic_keys_set)) |
-                    (non_epics["effective_epic"].isna())
-                ]
+                # Tasks that aren't direct children of any epic AND aren't subtasks of epic children
+                all_epic_direct_children = non_epics[non_epics["effective_epic"].isin(epic_keys_set)]
+                all_subtasks_of_children = df[df["parent_key"].isin(all_epic_direct_children["key"])]
+                all_linked = set(all_epic_direct_children["key"]).union(set(all_subtasks_of_children["key"])).union(epic_keys_set)
+                orphans = df[~df["key"].isin(all_linked)]
                 if not orphans.empty:
                     orphan_data = orphans[["key", "summary", "status", "type", "assignee", "parent_key", "epic_link"]].copy()
                     orphan_data.columns = ["Key", "Resumo", "Status", "Tipo", "Responsável", "parent_key", "epic_link"]
