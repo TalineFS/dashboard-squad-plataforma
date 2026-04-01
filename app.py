@@ -1682,11 +1682,10 @@ def main():
                     st.info("Selecione uma data alvo.")
                     st.stop()
 
-                # Ensure target_date is a date object (st.date_input can vary)
-                if hasattr(target_date, 'date'):
-                    target_date = target_date.date()
-                today_d = date.today()
-                days_diff = (target_date - today_d).days
+                # Convert to plain date via string to avoid any type conflicts
+                target_dt = datetime.strptime(str(target_date)[:10], "%Y-%m-%d").date()
+                today_dt = datetime.strptime(str(date.today()), "%Y-%m-%d").date()
+                days_diff = (target_dt - today_dt).days
                 weeks_until = max(1, days_diff // 7)
 
                 # Run simulation
@@ -1769,7 +1768,7 @@ def main():
                         )
 
                     fig_hist2.update_layout(
-                        title=f"Distribuição: quantos itens até {target_date.strftime('%d/%m/%Y')}?",
+                        title=f"Distribuição: quantos itens até {target_dt.strftime('%d/%m/%Y')}?",
                         height=500,
                         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                         font=dict(family="DM Sans"),
