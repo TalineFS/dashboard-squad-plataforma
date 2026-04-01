@@ -1678,7 +1678,16 @@ def main():
                         min_value=date.today() + timedelta(days=1),
                     )
 
-                weeks_until = max(1, (target_date - date.today()).days // 7)
+                if target_date is None:
+                    st.info("Selecione uma data alvo.")
+                    st.stop()
+
+                # Ensure target_date is a date object (st.date_input can vary)
+                if hasattr(target_date, 'date'):
+                    target_date = target_date.date()
+                today_d = date.today()
+                days_diff = (target_date - today_d).days
+                weeks_until = max(1, days_diff // 7)
 
                 # Run simulation
                 items_results = []
