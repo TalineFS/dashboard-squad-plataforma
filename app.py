@@ -1682,11 +1682,15 @@ def main():
                     st.info("Selecione uma data alvo.")
                     st.stop()
 
-                # Convert to plain date via string to avoid any type conflicts
-                target_dt = datetime.strptime(str(target_date)[:10], "%Y-%m-%d").date()
-                today_dt = datetime.strptime(str(date.today()), "%Y-%m-%d").date()
-                days_diff = (target_dt - today_dt).days
+                # Use ordinal to avoid any type conflicts between date objects
+                try:
+                    target_ord = target_date.toordinal()
+                except AttributeError:
+                    target_ord = target_date.date().toordinal() if hasattr(target_date, 'date') else date.today().toordinal() + 28
+                today_ord = date.today().toordinal()
+                days_diff = target_ord - today_ord
                 weeks_until = max(1, days_diff // 7)
+                target_str = target_date.strftime("%d/%m/%Y") if hasattr(target_date, 'strftime') else str(target_date)[:10]
 
                 # Run simulation
                 items_results = []
@@ -1768,7 +1772,7 @@ def main():
                         )
 
                     fig_hist2.update_layout(
-                        title=f"Distribuição: quantos itens até {target_dt.strftime('%d/%m/%Y')}?",
+                        title=f"Distribuição: quantos itens até {target_str}?",
                         height=500,
                         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                         font=dict(family="DM Sans"),
