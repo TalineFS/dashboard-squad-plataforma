@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from collections import defaultdict
 import numpy as np
 
@@ -323,9 +323,9 @@ def main():
         filtered = filtered[~filtered["is_subtask"]]
 
     # ─── TABS ───
-    tab1, tab_plan, tab_gantt, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab_plan, tab_gantt, tab2, tab3, tab4, tab5, tab_mc = st.tabs([
         "📈 Visão Geral", "🎯 Planejados x Entregues", "📅 Timeline",
-        "🔄 Fluxo", "👤 Pessoas", "🚨 Alertas", "📋 Todos os Itens"
+        "🔄 Fluxo", "👤 Pessoas", "🚨 Alertas", "📋 Todos os Itens", "🎲 Monte Carlo"
     ])
 
     # ═══════════════════════════════════════
@@ -1444,6 +1444,356 @@ def main():
             height=600,
         )
 
+    # ═══════════════════════════════════════
+    # TAB MONTE CARLO
+    # ═══════════════════════════════════════
+    with tab_mc:
+        st.markdown("#### 🎲 Simulação Monte Carlo — Previsibilidade Kanban")
+        st.caption(
+            "Simulação probabilística baseada no throughput histórico da squad. "
+            "Roda 10.000 simulações para prever prazos com diferentes níveis de confiança."
+        )
+
+        # ─── Calculate historical weekly throughput ───
+        done_items = df[(df["status"] == "Done") & (df["resolved_dt"].notna())].copy()
+
+        if len(done_items) < 3:
+            st.warning("Dados insuficientes para Monte Carlo. Pelo menos 3 itens concluídos são necessários.")
+        else:
+            # Group by week
+            done_items["resolved_week"] = done_items["resolved_dt"].dt.isocalendar().week
+            done_items["resolved_year"] = done_items["resolved_dt"].dt.isocalendar().year
+            done_items["year_week"] = done_items["resolved_dt"].dt.strftime("%Y-S%U")
+
+            weekly_throughput = done_items.groupby("year_week").size().reset_index(name="count")
+            weekly_throughput = weekly_throughput.sort_values("year_week")
+
+            # Fill in weeks with 0 throughput
+            if len(weekly_throughput) > 1:
+                all_weeks = pd.date_range(
+                    start=done_items["resolved_dt"].min(),
+                    end=done_items["resolved_dt"].max(),
+                    freq="W-MON",
+                )
+                all_week_labels = [d.strftime("%Y-S%U") for d in all_weeks]
+                full_throughput = pd.DataFrame({"year_week": all_week_labels})
+                full_throughput = full_throughput.merge(weekly_throughput, on="year_week", how="left").fillna(0)
+                throughput_values = full_throughput["count"].astype(int).tolist()
+            else:
+                throughput_values = weekly_throughput["count"].tolist()
+
+            # Remove first and last week (may be incomplete)
+            if len(throughput_values) > 2:
+                throughput_values = throughput_values[1:-1]
+
+            if not throughput_values:
+                throughput_values = [done_items.shape[0]]
+
+            # ─── Throughput Summary ───
+            avg_tp = np.mean(throughput_values)
+            med_tp = np.median(throughput_values)
+            min_tp = min(throughput_values)
+            max_tp = max(throughput_values)
+            std_tp = np.std(throughput_values)
+
+            kc1, kc2, kc3, kc4, kc5 = st.columns(5)
+            kc1.metric("📊 Throughput Médio", f"{avg_tp:.1f}/sem")
+            kc2.metric("📊 Mediana", f"{med_tp:.0f}/sem")
+            kc3.metric("⬇️ Mínimo", f"{min_tp:.0f}/sem")
+            kc4.metric("⬆️ Máximo", f"{max_tp:.0f}/sem")
+            kc5.metric("📐 Desvio Padrão", f"{std_tp:.1f}")
+
+            st.markdown("---")
+
+            # ─── Throughput History Chart ───
+            st.markdown("##### 📊 Throughput Histórico (itens/semana)")
+            tp_chart = pd.DataFrame({"Semana": range(1, len(throughput_values) + 1), "Itens": throughput_values})
+            fig_tp = go.Figure()
+            fig_tp.add_trace(go.Bar(
+                x=tp_chart["Semana"], y=tp_chart["Itens"],
+                marker_color="#6366f1", opacity=0.8,
+                text=tp_chart["Itens"], textposition="outside",
+            ))
+            fig_tp.add_shape(
+                type="line", x0=0.5, x1=len(throughput_values) + 0.5,
+                y0=avg_tp, y1=avg_tp,
+                line=dict(color="#f59e0b", width=2, dash="dash"),
+            )
+            fig_tp.add_annotation(
+                x=len(throughput_values), y=avg_tp,
+                text=f"Média: {avg_tp:.1f}", showarrow=False,
+                font=dict(color="#f59e0b", size=11), yshift=12,
+            )
+            fig_tp.update_layout(
+                height=280,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="DM Sans"),
+                xaxis_title="Semana", yaxis_title="Itens concluídos",
+                margin=dict(t=20, b=40),
+            )
+            st.plotly_chart(fig_tp, use_container_width=True)
+
+            st.markdown("---")
+
+            # ─── Simulation Modes ───
+            sim_mode = st.radio(
+                "Tipo de simulação:",
+                ["📅 Quando N itens serão entregues?", "📦 Quantos itens até uma data?"],
+                horizontal=True,
+            )
+
+            NUM_SIMULATIONS = 10000
+            np.random.seed(42)
+
+            if sim_mode == "📅 Quando N itens serão entregues?":
+                st.markdown("##### 📅 Quando N itens serão entregues?")
+                st.caption("Simula quando um número de itens pode ser concluído, baseado no throughput histórico.")
+
+                mc_col1, mc_col2 = st.columns([1, 2])
+
+                with mc_col1:
+                    # Count pending items for default
+                    pending = len(df[~df["status"].isin(["Done", "Backlog"])])
+                    n_items = st.number_input(
+                        "Quantos itens?",
+                        min_value=1, max_value=200, value=max(1, pending),
+                        help="Quantidade de itens a entregar",
+                    )
+
+                # Run simulation
+                weeks_results = []
+                for _ in range(NUM_SIMULATIONS):
+                    remaining = n_items
+                    weeks = 0
+                    while remaining > 0:
+                        # Random sample from historical throughput
+                        weekly = np.random.choice(throughput_values)
+                        remaining -= weekly
+                        weeks += 1
+                        if weeks > 200:
+                            break
+                    weeks_results.append(weeks)
+
+                weeks_arr = np.array(weeks_results)
+
+                # Percentiles
+                p50 = int(np.percentile(weeks_arr, 50))
+                p70 = int(np.percentile(weeks_arr, 70))
+                p85 = int(np.percentile(weeks_arr, 85))
+                p95 = int(np.percentile(weeks_arr, 95))
+
+                # Convert to dates
+                today_date = date.today()
+                date_p50 = today_date + timedelta(weeks=p50)
+                date_p70 = today_date + timedelta(weeks=p70)
+                date_p85 = today_date + timedelta(weeks=p85)
+                date_p95 = today_date + timedelta(weeks=p95)
+
+                with mc_col1:
+                    st.markdown("---")
+                    st.markdown("**Resultados:**")
+                    st.markdown(
+                        f'<div style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">50% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#6366f1;">{p50} semanas → {date_p50.strftime("%d/%m/%Y")}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">70% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#10b981;">{p70} semanas → {date_p70.strftime("%d/%m/%Y")}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">85% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#f59e0b;">{p85} semanas → {date_p85.strftime("%d/%m/%Y")}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">95% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#ef4444;">{p95} semanas → {date_p95.strftime("%d/%m/%Y")}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                with mc_col2:
+                    # Histogram
+                    fig_hist = go.Figure()
+                    fig_hist.add_trace(go.Histogram(
+                        x=weeks_arr, nbinsx=max(10, p95 - p50 + 5),
+                        marker_color="#6366f1", opacity=0.7,
+                        name="Simulações",
+                    ))
+
+                    # Percentile lines
+                    for pval, pname, pcolor in [
+                        (p50, "50%", "#6366f1"),
+                        (p70, "70%", "#10b981"),
+                        (p85, "85%", "#f59e0b"),
+                        (p95, "95%", "#ef4444"),
+                    ]:
+                        fig_hist.add_shape(
+                            type="line", x0=pval, x1=pval, y0=0, y1=1,
+                            xref="x", yref="paper",
+                            line=dict(color=pcolor, width=2, dash="dash"),
+                        )
+                        fig_hist.add_annotation(
+                            x=pval, y=1.05, yref="paper",
+                            text=f"<b>P{pname}</b><br>{pval}sem",
+                            showarrow=False,
+                            font=dict(color=pcolor, size=10),
+                        )
+
+                    fig_hist.update_layout(
+                        title=f"Distribuição: quando {n_items} itens serão entregues?",
+                        height=500,
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="DM Sans"),
+                        xaxis_title="Semanas", yaxis_title="Frequência (simulações)",
+                        showlegend=False,
+                        margin=dict(t=60),
+                    )
+                    st.plotly_chart(fig_hist, use_container_width=True)
+
+            else:
+                # ─── How many items by date X? ───
+                st.markdown("##### 📦 Quantos itens até uma data?")
+                st.caption("Simula quantos itens podem ser entregues até uma data alvo.")
+
+                mc_col1, mc_col2 = st.columns([1, 2])
+
+                with mc_col1:
+                    target_date = st.date_input(
+                        "Data alvo:",
+                        value=date.today() + timedelta(weeks=4),
+                        min_value=date.today() + timedelta(days=1),
+                    )
+
+                weeks_until = max(1, (target_date - date.today()).days // 7)
+
+                # Run simulation
+                items_results = []
+                for _ in range(NUM_SIMULATIONS):
+                    total_items = 0
+                    for _ in range(weeks_until):
+                        total_items += np.random.choice(throughput_values)
+                    items_results.append(total_items)
+
+                items_arr = np.array(items_results)
+
+                # Percentiles (inverted — lower percentile = fewer items = more conservative)
+                ip50 = int(np.percentile(items_arr, 50))
+                ip70 = int(np.percentile(items_arr, 30))  # 70% chance of delivering AT LEAST this many
+                ip85 = int(np.percentile(items_arr, 15))   # 85% chance
+                ip95 = int(np.percentile(items_arr, 5))    # 95% chance
+
+                with mc_col1:
+                    st.markdown("---")
+                    st.markdown(f"**Resultados** ({weeks_until} semanas):")
+                    st.markdown(
+                        f'<div style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">50% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#6366f1;">≥ {ip50} itens</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">70% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#10b981;">≥ {ip70} itens</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">85% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#f59e0b;">≥ {ip85} itens</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); '
+                        f'border-radius:10px; padding:16px; margin:8px 0;">'
+                        f'<div style="font-size:13px; color:#94a3b8;">95% de confiança</div>'
+                        f'<div style="font-size:20px; font-weight:700; color:#ef4444;">≥ {ip95} itens</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                with mc_col2:
+                    # Histogram
+                    fig_hist2 = go.Figure()
+                    fig_hist2.add_trace(go.Histogram(
+                        x=items_arr, nbinsx=30,
+                        marker_color="#6366f1", opacity=0.7,
+                        name="Simulações",
+                    ))
+
+                    for pval, pname, pcolor in [
+                        (ip50, "50%", "#6366f1"),
+                        (ip70, "70%", "#10b981"),
+                        (ip85, "85%", "#f59e0b"),
+                        (ip95, "95%", "#ef4444"),
+                    ]:
+                        fig_hist2.add_shape(
+                            type="line", x0=pval, x1=pval, y0=0, y1=1,
+                            xref="x", yref="paper",
+                            line=dict(color=pcolor, width=2, dash="dash"),
+                        )
+                        fig_hist2.add_annotation(
+                            x=pval, y=1.05, yref="paper",
+                            text=f"<b>P{pname}</b><br>≥{pval}",
+                            showarrow=False,
+                            font=dict(color=pcolor, size=10),
+                        )
+
+                    fig_hist2.update_layout(
+                        title=f"Distribuição: quantos itens até {target_date.strftime('%d/%m/%Y')}?",
+                        height=500,
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(family="DM Sans"),
+                        xaxis_title="Itens entregues", yaxis_title="Frequência (simulações)",
+                        showlegend=False,
+                        margin=dict(t=60),
+                    )
+                    st.plotly_chart(fig_hist2, use_container_width=True)
+
+            # ─── Explanation ───
+            st.markdown("---")
+            with st.expander("ℹ️ Como funciona a simulação Monte Carlo?", expanded=False):
+                st.markdown(
+                    "A simulação Monte Carlo é uma técnica probabilística para **previsão de prazos** no Kanban. "
+                    "Em vez de usar apenas a média (que pode ser enganosa), ela roda milhares de cenários aleatórios "
+                    "baseados no seu histórico real de entregas."
+                )
+                st.markdown("**Como funciona:**")
+                st.markdown(
+                    f"1. O dashboard coleta o throughput semanal da squad (últimas **{len(throughput_values)} semanas**)\n"
+                    f"2. Roda **{NUM_SIMULATIONS:,}** simulações, cada uma sorteando aleatoriamente um throughput de uma semana do histórico\n"
+                    f"3. Para cada simulação, acumula os itens entregues até atingir a meta\n"
+                    f"4. Ordena os resultados e calcula os percentis"
+                )
+                st.markdown("**Como interpretar os percentis:**")
+                st.markdown(
+                    "- **50%** — Metade das simulações terminou antes disso. É otimista.\n"
+                    "- **70%** — Boa previsão para comunicação interna.\n"
+                    "- **85%** — Previsão confiável para comprometimento com stakeholders.\n"
+                    "- **95%** — Cenário mais conservador. Quase certeza.\n\n"
+                    "**Recomendação:** Use **85%** para compromissos com liderança e **70%** para metas internas."
+                )
+
     # ─── FOOTER ───
     st.markdown("---")
     st.markdown(
@@ -1455,7 +1805,7 @@ def main():
     )
 
 
-# ─── AUTHENTICATION (Senha simples) ───
+# ─── AUTHENTICATION (Senha simples via secrets) ───
 def check_password():
     """Tela de login simples. Retorna True se autenticado."""
 
