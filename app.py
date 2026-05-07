@@ -1349,11 +1349,11 @@ def main():
             )
 
             cfd_data = []
-            for date in date_range:
-                row = {"Data": date}
+            for cfd_date in date_range:
+                row = {"Data": cfd_date}
                 for status in STATUS_ORDER:
                     created_before = df[
-                        (df["created_dt"] <= date) &
+                        (df["created_dt"] <= cfd_date) &
                         (df["status"] == status)
                     ]
                     row[status] = len(created_before)
