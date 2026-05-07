@@ -5,8 +5,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, date, timezone
 
-# Fuso horário de Brasília (UTC-3)
+# Fuso horário de Brasília (UTC-3) — usado apenas para exibição
 BRT = timezone(timedelta(hours=-3))
+
+def now_brt():
+    """Retorna datetime atual em Brasília, sem timezone (compatível com Pandas)."""
+    return datetime.now(BRT).replace(tzinfo=None)
 from collections import defaultdict
 import numpy as np
 
@@ -268,7 +272,7 @@ def main():
         st.error("Nenhum dado encontrado. Verifique a conexão com o Jira.")
         return
 
-    last_updated = datetime.now(BRT).strftime("%d/%m/%Y %H:%M")
+    last_updated = now_brt().strftime("%d/%m/%Y %H:%M")
     st.caption(f"🔄 Última atualização: {last_updated} &nbsp;|&nbsp; Total de issues: {len(df)}")
 
     # ─── SIDEBAR FILTERS ───
@@ -559,8 +563,8 @@ def main():
             '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px;">'
             '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou no prazo</div>'
             '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois do prazo</div>'
-            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item não foi concluído</div>'
-            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Pazo ainda não chegou (item em andamento)</div>'
+            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e item não concluído</div>'
+            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Em andamento (No prazo)</div>'
             '</div></div>',
             unsafe_allow_html=True,
         )
@@ -1347,7 +1351,7 @@ def main():
         if not df.empty:
             date_range = pd.date_range(
                 start=df["created_dt"].min(),
-                end=datetime.now(BRT),
+                end=now_brt(),
                 freq="D"
             )
 
@@ -1481,7 +1485,7 @@ def main():
         st.markdown("---")
 
         # Stale items (>7 days without update in active status)
-        seven_days_ago = (datetime.now(BRT) - timedelta(days=7)).strftime("%Y-%m-%d")
+        seven_days_ago = (now_brt() - timedelta(days=7)).strftime("%Y-%m-%d")
         stale = filtered[
             (~filtered["status"].isin(["Done", "To Do", "Backlog"]))
             & (filtered["updated"] <= seven_days_ago)
