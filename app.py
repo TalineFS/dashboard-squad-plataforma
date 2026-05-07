@@ -26,8 +26,8 @@ TEAM = {
     "hgp": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
     "gfm": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
     "Leonardo Almeida": {"name": "Leonardo", "role": "QA Automação", "color": "#10b981"},
-    "Marcelo Martins Oliveira": {"name": "Marcelo", "role": "Eng. Backend", "color": "#ef4444"},
-    "ats": {"name": "Sato", "role": "Eng. Mobile", "color": "#ec4899"},
+    "Marcelo Martins Oliveira": {"name": "Marcelo", "role": "Arquiteto Backend", "color": "#ef4444"},
+    "ats": {"name": "Sato", "role": "Arquiteto Mobile", "color": "#ec4899"},
     "Ricardo Moro": {"name": "Ricardo", "role": "Ger. Arquitetura", "color": "#8b5cf6"},
 }
 
@@ -556,7 +556,7 @@ def main():
             '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px;">'
             '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou no prazo</div>'
             '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois do prazo</div>'
-            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item NÃO foi concluído</div>'
+            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item não foi concluído</div>'
             '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Prazo ainda não chegou (item em andamento)</div>'
             '</div></div>',
             unsafe_allow_html=True,
