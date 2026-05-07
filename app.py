@@ -499,10 +499,10 @@ def main():
             'border-radius:10px; padding:14px 18px; margin-bottom:16px;">'
             '<div style="font-size:13px; font-weight:600; margin-bottom:8px; color:#e2e8f0;">📖 Legenda dos status de entrega:</div>'
             '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px;">'
-            '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou na due date</div>'
-            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois da due date</div>'
-            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Due date já passou e o item NÃO foi concluído</div>'
-            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Due date ainda não chegou (item em andamento)</div>'
+            '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou no prazo</div>'
+            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois do prazo</div>'
+            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item NÃO foi concluído</div>'
+            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Prazo ainda não chegou (item em andamento)</div>'
             '</div></div>',
             unsafe_allow_html=True,
         )
