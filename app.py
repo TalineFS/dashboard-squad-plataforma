@@ -23,11 +23,11 @@ PROJECT_KEY = "SPT"
 
 # ─── TEAM CONFIG ───
 TEAM = {
-    "hgp": {"name": "Guedes", "role": "FullStack Dev", "color": "#f59e0b"},
+    "hgp": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
     "gfm": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
     "Leonardo Almeida": {"name": "Leonardo", "role": "QA Automação", "color": "#10b981"},
-    "Marcelo Martins Oliveira": {"name": "Marcelo", "role": "Arquiteto Backend", "color": "#ef4444"},
-    "ats": {"name": "Sato", "role": "Arquiteto Mobile", "color": "#ec4899"},
+    "Marcelo Martins Oliveira": {"name": "Marcelo", "role": "Eng. Backend", "color": "#ef4444"},
+    "ats": {"name": "Sato", "role": "Eng. Mobile", "color": "#ec4899"},
     "Ricardo Moro": {"name": "Ricardo", "role": "Ger. Arquitetura", "color": "#8b5cf6"},
 }
 
@@ -332,6 +332,22 @@ def main():
     # TAB 1 — VISÃO GERAL
     # ═══════════════════════════════════════
     with tab1:
+        # Period of analysis
+        date_min = filtered["created_dt"].min()
+        date_max = filtered[["created_dt", "resolved_dt", "updated_dt"]].max().max()
+        period_start = date_min.strftime("%d/%m/%Y") if pd.notna(date_min) else "–"
+        period_end = date_max.strftime("%d/%m/%Y") if pd.notna(date_max) else "–"
+        total_weeks = max(1, ((date_max - date_min).days // 7)) if pd.notna(date_min) and pd.notna(date_max) else 0
+        st.markdown(
+            f'<div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); '
+            f'border-radius:10px; padding:12px 18px; margin-bottom:16px; font-size:13px;">'
+            f'📅 <b>Período de análise:</b> {period_start} a {period_end} '
+            f'({total_weeks} semanas) &nbsp;|&nbsp; '
+            f'📊 <b>Itens analisados:</b> {len(filtered)} de {len(df)} total'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
         # KPI Cards
         total = len(filtered)
         done = len(filtered[filtered["status"] == "Done"])
@@ -476,7 +492,20 @@ def main():
     # ═══════════════════════════════════════
     with tab_plan:
         st.markdown("#### 🎯 Planejados x Entregues (por semana)")
-        st.caption("Itens com **Due Date** definida no Jira. Planejado = due date cai na semana. Entregue = concluído até a due date.")
+
+        # Status legend
+        st.markdown(
+            '<div style="background:rgba(30,41,59,0.6); border:1px solid rgba(148,163,184,0.1); '
+            'border-radius:10px; padding:14px 18px; margin-bottom:16px;">'
+            '<div style="font-size:13px; font-weight:600; margin-bottom:8px; color:#e2e8f0;">📖 Legenda dos status de entrega:</div>'
+            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px;">'
+            '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou na due date</div>'
+            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois da due date</div>'
+            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Due date já passou e o item NÃO foi concluído</div>'
+            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Due date ainda não chegou (item em andamento)</div>'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
 
         # Filter only items with duedate
         has_due = filtered[filtered["duedate_dt"].notna()].copy()
@@ -648,7 +677,7 @@ def main():
     # ═══════════════════════════════════════
     with tab_gantt:
         st.markdown("#### 📅 Timeline — Épicos e Tarefas")
-        st.caption("Visão hierárquica com barras no estilo Jira. Cada épico tem sua cor, filhas herdam a cor do pai. Muda para 🟡 amarelo (risco) ou 🔴 vermelho (atrasado).")
+        st.caption("Visão hierárquica dos épicos. Cores por status: 🟢 No prazo · 🟡 Risco de atraso · 🔴 Atrasado · 🔵 Concluído")
 
         epics = df[df["type"] == "Epic"].copy()
 
@@ -660,21 +689,11 @@ def main():
             # ─── Build hierarchical data: Epic → Children ───
             timeline_rows = []
 
-            # Jira-style color palette — each epic gets its own color
-            EPIC_PALETTE = [
-                "#a855f7",  # Purple (like Jira)
-                "#10b981",  # Green/Teal
-                "#3b82f6",  # Blue
-                "#f59e0b",  # Amber
-                "#ec4899",  # Pink
-                "#06b6d4",  # Cyan
-                "#8b5cf6",  # Violet
-                "#f97316",  # Orange
-            ]
-
-            # Risk override colors
-            COLOR_OVERDUE = "#ef4444"
-            COLOR_AT_RISK = "#f59e0b"
+            # Semantic colors (no per-epic palette — clarity over aesthetics)
+            COLOR_ON_TRACK = "#10b981"    # Green — No prazo
+            COLOR_DONE = "#3b82f6"        # Blue — Concluído
+            COLOR_AT_RISK = "#f59e0b"     # Yellow/Amber — Risco de atraso
+            COLOR_OVERDUE = "#ef4444"     # Red — Atrasado
 
             epics_sorted = epics.sort_values("created_dt")
 
@@ -713,9 +732,6 @@ def main():
                 total_all = len(all_descendants)
                 done_all = len(all_descendants[all_descendants["status"] == "Done"])
 
-                # Epic theme color (cycles through palette)
-                theme_color = EPIC_PALETTE[epic_idx % len(EPIC_PALETTE)]
-
                 # Dates
                 start = epic["created_dt"]
                 end = epic["duedate_dt"] if pd.notna(epic.get("duedate_dt")) else None
@@ -730,11 +746,15 @@ def main():
                 if end <= start:
                     end = start + pd.Timedelta(days=14)
 
-                # Risk classification (determines if we override the theme color)
+                # Semantic color based on risk
                 elapsed_ratio = max(0, (today - start).days) / max(1, (end - start).days)
                 progress_ratio = progress / 100
 
-                if today > end and progress < 100:
+                if progress == 100:
+                    risk = "done"
+                    bar_color = COLOR_DONE
+                    risk_label = "🔵 Concluído"
+                elif today > end:
                     risk = "overdue"
                     bar_color = COLOR_OVERDUE
                     risk_label = "🔴 Atrasado"
@@ -742,13 +762,9 @@ def main():
                     risk = "at_risk"
                     bar_color = COLOR_AT_RISK
                     risk_label = "🟡 Risco"
-                elif progress == 100:
-                    risk = "done"
-                    bar_color = theme_color
-                    risk_label = "🟢 Concluído"
                 else:
                     risk = "on_track"
-                    bar_color = theme_color
+                    bar_color = COLOR_ON_TRACK
                     risk_label = "🟢 No prazo"
 
                 # Dependencies
@@ -774,7 +790,6 @@ def main():
                     "status": epic["status"],
                     "assignee": epic["assignee"],
                     "bar_color": bar_color,
-                    "theme_color": theme_color,
                     "risk": risk,
                     "risk_label": risk_label,
                     "is_epic": True,
@@ -795,10 +810,10 @@ def main():
                     if pd.isna(c_end) or c_end <= c_start:
                         c_end = c_start + pd.Timedelta(days=7)
 
-                    # Child uses epic's theme color, unless at risk/overdue
+                    # Semantic color for children
                     if child["status"] == "Done":
-                        c_color = theme_color
-                        c_risk = "🟢"
+                        c_color = COLOR_DONE
+                        c_risk = "🔵"
                     elif pd.notna(child.get("duedate_dt")) and today > child["duedate_dt"]:
                         c_color = COLOR_OVERDUE
                         c_risk = "🔴"
@@ -811,7 +826,7 @@ def main():
                             c_color = COLOR_AT_RISK
                             c_risk = "🟡"
                         else:
-                            c_color = theme_color
+                            c_color = COLOR_ON_TRACK
                             c_risk = "🟢"
 
                     status_short = child["status"][:12]
@@ -833,7 +848,6 @@ def main():
                         "status": child["status"],
                         "assignee": child["assignee"],
                         "bar_color": c_color,
-                        "theme_color": theme_color,
                         "risk": c_risk,
                         "risk_label": f"{c_risk} {status_short}",
                         "is_epic": False,
@@ -1055,9 +1069,10 @@ def main():
             # ─── LEGENDA ───
             st.markdown(
                 '<div style="display:flex; gap:20px; justify-content:center; font-size:12px; margin-top:-10px; flex-wrap:wrap;">'
-                '<span><span style="color:#a855f7;">████</span> Épico (cor única)</span>'
+                '<span><span style="color:#10b981;">████</span> No prazo</span>'
                 '<span><span style="color:#f59e0b;">████</span> Risco de atraso</span>'
                 '<span><span style="color:#ef4444;">████</span> Atrasado</span>'
+                '<span><span style="color:#3b82f6;">████</span> Concluído</span>'
                 '<span style="color:#60a5fa;">┆ Hoje</span>'
                 '</div>',
                 unsafe_allow_html=True,
@@ -1324,6 +1339,20 @@ def main():
     with tab3:
         st.markdown("#### 👤 Métricas por Membro da Squad")
 
+        # Period
+        p_date_min = filtered["created_dt"].min()
+        p_date_max = filtered[["created_dt", "resolved_dt", "updated_dt"]].max().max()
+        p_start = p_date_min.strftime("%d/%m/%Y") if pd.notna(p_date_min) else "–"
+        p_end = p_date_max.strftime("%d/%m/%Y") if pd.notna(p_date_max) else "–"
+        st.markdown(
+            f'<div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); '
+            f'border-radius:10px; padding:12px 18px; margin-bottom:16px; font-size:13px;">'
+            f'📅 <b>Período de análise:</b> {p_start} a {p_end} &nbsp;|&nbsp; '
+            f'📊 <b>Itens analisados:</b> {len(filtered)}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
         for key, info in TEAM.items():
             member_items = filtered[filtered["assignee"] == info["name"]]
             if member_items.empty:
@@ -1449,6 +1478,47 @@ def main():
     # ═══════════════════════════════════════
     with tab_mc:
         st.markdown("#### 🎲 Simulação Monte Carlo — Previsibilidade Kanban")
+
+        # Tutorial
+        with st.expander("📚 Tutorial — Como usar esta aba (clique para abrir)", expanded=False):
+            st.markdown(
+                "### O que é Monte Carlo?\n"
+                "É uma técnica de simulação que usa o **histórico real de entregas** da squad para prever prazos futuros "
+                "de forma probabilística. Em vez de chutar um prazo, ela roda **10.000 cenários** e te diz a probabilidade de cada resultado."
+            )
+            st.markdown("### Como usar em 3 passos:")
+            st.markdown(
+                '**Passo 1 — Escolha o tipo de pergunta:**\n'
+                '- 📅 **"Quando N itens serão entregues?"** → Você informa quantos itens precisa entregar. A simulação te diz a data provável.\n'
+                '- 📦 **"Quantos itens até uma data?"** → Você escolhe uma data. A simulação te diz quantos itens a squad consegue entregar até lá.'
+            )
+            st.markdown(
+                '**Passo 2 — Preencha o parâmetro:**\n'
+                '- No modo 📅: informe a quantidade de itens (já vem pré-preenchido com os itens pendentes da squad)\n'
+                '- No modo 📦: selecione a data alvo no calendário'
+            )
+            st.markdown(
+                '**Passo 3 — Leia os resultados pelos percentis:**\n'
+                '- **50%** → Metade das simulações terminou antes. Use como referência otimista.\n'
+                '- **70%** → Boa previsão para comunicação **interna** com o time.\n'
+                '- **85%** → Previsão confiável para **compromissos com stakeholders e liderança**. ⭐ Recomendado.\n'
+                '- **95%** → Cenário conservador. Quase certeza de entrega.'
+            )
+            st.markdown("### Exemplo prático:")
+            st.markdown(
+                "Se a squad precisa entregar **15 itens** e o throughput médio é 5/semana, o Monte Carlo pode mostrar:\n"
+                "- 50% de confiança → 3 semanas\n"
+                "- 85% de confiança → 5 semanas ← **use este para comprometer com a liderança**\n"
+                "- 95% de confiança → 7 semanas"
+            )
+            st.markdown("### Dicas:")
+            st.markdown(
+                "- Quanto **mais dados históricos** a squad tiver, mais precisa é a simulação\n"
+                "- Se o throughput é **muito irregular** (desvio padrão alto), a faixa entre 50% e 95% será grande — isso é um sinal de que o fluxo precisa ser estabilizado\n"
+                "- Use o gráfico de **Throughput Histórico** para identificar semanas atípicas (férias, emergências)"
+            )
+
+        st.markdown("")
         st.caption(
             "Simulação probabilística baseada no throughput histórico da squad. "
             "Roda 10.000 simulações para prever prazos com diferentes níveis de confiança."
