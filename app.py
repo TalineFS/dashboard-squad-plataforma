@@ -332,30 +332,85 @@ def main():
     # TAB 1 — VISÃO GERAL
     # ═══════════════════════════════════════
     with tab1:
-        # Period of analysis
-        date_min = filtered["created_dt"].min()
-        date_max = filtered[["created_dt", "resolved_dt", "updated_dt"]].max().max()
-        period_start = date_min.strftime("%d/%m/%Y") if pd.notna(date_min) else "–"
-        period_end = date_max.strftime("%d/%m/%Y") if pd.notna(date_max) else "–"
-        total_weeks = max(1, ((date_max - date_min).days // 7)) if pd.notna(date_min) and pd.notna(date_max) else 0
+        # ─── Period Filter ───
+        date_min_all = filtered["created_dt"].min()
+        date_max_all = filtered[["created_dt", "resolved_dt", "updated_dt"]].max().max()
+
         st.markdown(
-            f'<div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); '
-            f'border-radius:10px; padding:12px 18px; margin-bottom:16px; font-size:13px;">'
-            f'📅 <b>Período de análise:</b> {period_start} a {period_end} '
-            f'({total_weeks} semanas) &nbsp;|&nbsp; '
-            f'📊 <b>Itens analisados:</b> {len(filtered)} de {len(df)} total'
-            f'</div>',
+            '<div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); '
+            'border-radius:10px; padding:14px 18px; margin-bottom:12px;">'
+            '<span style="font-size:13px;">📅 <b>Filtro de período</b> — selecione o intervalo de datas para análise:</span>'
+            '</div>',
             unsafe_allow_html=True,
         )
 
-        # KPI Cards
-        total = len(filtered)
-        done = len(filtered[filtered["status"] == "Done"])
-        wip = len(filtered[~filtered["status"].isin(["Done", "To Do", "Backlog"])])
-        blocked = len(filtered[filtered["status"].isin(["Bloqueado", "BUGS"])])
-        bugs_open = len(filtered[(filtered["type"] == "Bug") & (filtered["status"] != "Done")])
+        fc1, fc2, fc3 = st.columns([1, 1, 2])
+        with fc1:
+            vg_start = st.date_input(
+                "Data início",
+                value=date_min_all.date() if pd.notna(date_min_all) else date.today() - timedelta(days=90),
+                key="vg_date_start",
+            )
+        with fc2:
+            vg_end = st.date_input(
+                "Data fim",
+                value=date.today(),
+                key="vg_date_end",
+            )
+        with fc3:
+            st.markdown("")
+            st.markdown("")
+            quick_range = st.radio(
+                "Atalhos:",
+                ["Personalizado", "Últimos 30d", "Últimos 60d", "Últimos 90d", "Tudo"],
+                horizontal=True,
+                key="vg_quick_range",
+            )
 
-        done_with_lead = filtered[(filtered["status"] == "Done") & (filtered["lead_days"].notna())]
+        # Apply quick range if selected
+        if quick_range == "Últimos 30d":
+            vg_start = date.today() - timedelta(days=30)
+            vg_end = date.today()
+        elif quick_range == "Últimos 60d":
+            vg_start = date.today() - timedelta(days=60)
+            vg_end = date.today()
+        elif quick_range == "Últimos 90d":
+            vg_start = date.today() - timedelta(days=90)
+            vg_end = date.today()
+        elif quick_range == "Tudo":
+            vg_start = date_min_all.date() if pd.notna(date_min_all) else date.today() - timedelta(days=365)
+            vg_end = date.today()
+
+        # Convert to Timestamps safely
+        try:
+            vg_start_ts = pd.Timestamp(str(vg_start)[:10])
+            vg_end_ts = pd.Timestamp(str(vg_end)[:10]) + pd.Timedelta(days=1)  # inclusive end
+        except Exception:
+            vg_start_ts = pd.Timestamp("2020-01-01")
+            vg_end_ts = pd.Timestamp.now()
+
+        # Filter by period (items created OR resolved within the range)
+        vg_filtered = filtered[
+            (filtered["created_dt"] >= vg_start_ts) & (filtered["created_dt"] <= vg_end_ts)
+            | ((filtered["resolved_dt"].notna()) & (filtered["resolved_dt"] >= vg_start_ts) & (filtered["resolved_dt"] <= vg_end_ts))
+        ].copy()
+
+        total_weeks_vg = max(1, (vg_end_ts - vg_start_ts).days // 7)
+        st.caption(
+            f"📊 Período: **{str(vg_start)[:10]}** a **{str(vg_end)[:10]}** "
+            f"({total_weeks_vg} semanas) — {len(vg_filtered)} itens de {len(filtered)} filtrados"
+        )
+
+        st.markdown("---")
+
+        # KPI Cards (using vg_filtered)
+        total = len(vg_filtered)
+        done = len(vg_filtered[vg_filtered["status"] == "Done"])
+        wip = len(vg_filtered[~vg_filtered["status"].isin(["Done", "To Do", "Backlog"])])
+        blocked = len(vg_filtered[vg_filtered["status"].isin(["Bloqueado", "BUGS"])])
+        bugs_open = len(vg_filtered[(vg_filtered["type"] == "Bug") & (vg_filtered["status"] != "Done")])
+
+        done_with_lead = vg_filtered[(vg_filtered["status"] == "Done") & (vg_filtered["lead_days"].notna())]
         avg_lead = f"{done_with_lead['lead_days'].mean():.1f}d" if len(done_with_lead) > 0 else "–"
         completion_rate = f"{(done / total * 100):.0f}%" if total > 0 else "0%"
 
@@ -374,7 +429,7 @@ def main():
 
         with col1:
             st.markdown("#### Distribuição por Status")
-            status_counts = filtered["status"].value_counts()
+            status_counts = vg_filtered["status"].value_counts()
             status_df = pd.DataFrame({
                 "Status": status_counts.index,
                 "Quantidade": status_counts.values
@@ -400,7 +455,7 @@ def main():
 
         with col2:
             st.markdown("#### Distribuição por Tipo")
-            type_counts = filtered["type"].value_counts()
+            type_counts = vg_filtered["type"].value_counts()
             fig = px.pie(
                 values=type_counts.values,
                 names=type_counts.index,
@@ -420,7 +475,7 @@ def main():
 
         with col3:
             st.markdown("#### Throughput Semanal (itens concluídos)")
-            done_items = filtered[filtered["resolved_dt"].notna()].copy()
+            done_items = vg_filtered[vg_filtered["resolved_dt"].notna()].copy()
             if not done_items.empty:
                 done_items["week"] = done_items["resolved_dt"].dt.isocalendar().week
                 done_items["year_week"] = done_items["resolved_dt"].dt.strftime("%Y-S%U")
@@ -472,7 +527,7 @@ def main():
 
         # Distribuição por Responsável
         st.markdown("#### Distribuição por Responsável")
-        assignee_counts = filtered["assignee"].value_counts().reset_index()
+        assignee_counts = vg_filtered["assignee"].value_counts().reset_index()
         assignee_counts.columns = ["Pessoa", "Quantidade"]
         colors = [get_member_color(p) for p in assignee_counts["Pessoa"]]
         fig = px.bar(
@@ -499,10 +554,10 @@ def main():
             'border-radius:10px; padding:14px 18px; margin-bottom:16px;">'
             '<div style="font-size:13px; font-weight:600; margin-bottom:8px; color:#e2e8f0;">📖 Legenda dos status de entrega:</div>'
             '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px;">'
-            '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou no prazo</div>'
-            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois do prazo</div>'
-            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item NÃO foi concluído</div>'
-            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Prazo ainda não chegou (item em andamento)</div>'
+            '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou na due date</div>'
+            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois da due date</div>'
+            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Due date já passou e o item NÃO foi concluído</div>'
+            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Due date ainda não chegou (item em andamento)</div>'
             '</div></div>',
             unsafe_allow_html=True,
         )
