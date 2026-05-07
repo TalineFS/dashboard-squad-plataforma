@@ -3,7 +3,10 @@ import requests
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+
+# Fuso horário de Brasília (UTC-3)
+BRT = timezone(timedelta(hours=-3))
 from collections import defaultdict
 import numpy as np
 
@@ -265,7 +268,7 @@ def main():
         st.error("Nenhum dado encontrado. Verifique a conexão com o Jira.")
         return
 
-    last_updated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    last_updated = datetime.now(BRT).strftime("%d/%m/%Y %H:%M")
     st.caption(f"🔄 Última atualização: {last_updated} &nbsp;|&nbsp; Total de issues: {len(df)}")
 
     # ─── SIDEBAR FILTERS ───
@@ -557,7 +560,7 @@ def main():
             '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou no prazo</div>'
             '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois do prazo</div>'
             '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item não foi concluído</div>'
-            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Prazo ainda não chegou (item em andamento)</div>'
+            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Pazo ainda não chegou (item em andamento)</div>'
             '</div></div>',
             unsafe_allow_html=True,
         )
@@ -1344,7 +1347,7 @@ def main():
         if not df.empty:
             date_range = pd.date_range(
                 start=df["created_dt"].min(),
-                end=datetime.now(),
+                end=datetime.now(BRT),
                 freq="D"
             )
 
@@ -1478,7 +1481,7 @@ def main():
         st.markdown("---")
 
         # Stale items (>7 days without update in active status)
-        seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        seven_days_ago = (datetime.now(BRT) - timedelta(days=7)).strftime("%Y-%m-%d")
         stale = filtered[
             (~filtered["status"].isin(["Done", "To Do", "Backlog"]))
             & (filtered["updated"] <= seven_days_ago)
