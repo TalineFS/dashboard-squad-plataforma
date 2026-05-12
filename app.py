@@ -33,21 +33,24 @@ TEAM = {
     "hgp": {"name": "Guedes", "role": "Backend Dev", "color": "#f59e0b"},
     "gfm": {"name": "Guilherme", "role": "FullStack Dev", "color": "#6366f1"},
     "Leonardo Almeida": {"name": "Leonardo", "role": "QA Automação", "color": "#10b981"},
-    "Marcelo Martins Oliveira": {"name": "Marcelo", "role": "Arquiteto Backend", "color": "#ef4444"},
+    "Marcelo Oliveira": {"name": "Marcelo", "role": "Arquiteto Backend", "color": "#ef4444"},
     "ats": {"name": "Sato", "role": "Arquiteto Mobile", "color": "#ec4899"},
     "Ricardo Moro": {"name": "Ricardo", "role": "Ger. Arquitetura", "color": "#8b5cf6"},
 }
 
-STATUS_ORDER = ["Backlog", "To Do", "In Progress", "Code Review", "Validação", "Bloqueado", "BUGS", "Done"]
+STATUS_ORDER = ["Backlog", "To Do", "Pausado", "In Progress", "Code Review", "Bugs", "BUGS", "Validação", "Aguardando Deploy", "Done", "Bloqueado"]
 STATUS_COLORS = {
     "Backlog": "#94a3b8",
     "To Do": "#60a5fa",
+    "Pausado": "#a78bfa",
     "In Progress": "#f59e0b",
-    "Code Review": "#a78bfa",
-    "Validação": "#38bdf8",
-    "Bloqueado": "#ef4444",
+    "Code Review": "#818cf8",
+    "Bugs": "#f87171",
     "BUGS": "#f87171",
+    "Validação": "#38bdf8",
+    "Aguardando Deploy": "#6366f1",
     "Done": "#10b981",
+    "Bloqueado": "#ef4444",
 }
 
 TYPE_COLORS = {
@@ -413,8 +416,8 @@ def main():
         # KPI Cards (using vg_filtered)
         total = len(vg_filtered)
         done = len(vg_filtered[vg_filtered["status"] == "Done"])
-        wip = len(vg_filtered[~vg_filtered["status"].isin(["Done", "To Do", "Backlog"])])
-        blocked = len(vg_filtered[vg_filtered["status"].isin(["Bloqueado", "BUGS"])])
+        wip = len(vg_filtered[~vg_filtered["status"].isin(["Done", "To Do", "Backlog", "Pausado"])])
+        blocked = len(vg_filtered[vg_filtered["status"].isin(["Bloqueado", "BUGS", "Bugs"])])
         bugs_open = len(vg_filtered[(vg_filtered["type"] == "Bug") & (vg_filtered["status"] != "Done")])
 
         done_with_lead = vg_filtered[(vg_filtered["status"] == "Done") & (vg_filtered["lead_days"].notna())]
@@ -562,9 +565,9 @@ def main():
             '<div style="font-size:13px; font-weight:600; margin-bottom:8px; color:#e2e8f0;">📖 Legenda dos status de entrega:</div>'
             '<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px;">'
             '<div><span style="color:#10b981;">✅ <b>No prazo</b></span> — Concluído (Done) antes ou no prazo</div>'
-            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) depois do prazo</div>'
-            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e item não concluído</div>'
-            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Em andamento (No prazo)</div>'
+            '<div><span style="color:#f59e0b;">⚠️ <b>Com atraso</b></span> — Concluído (Done) após o prazo</div>'
+            '<div><span style="color:#ef4444;">❌ <b>Não entregue</b></span> — Prazo expirado e o item não foi concluído</div>'
+            '<div><span style="color:#60a5fa;">🔜 <b>Pendente</b></span> — Item em andamento (no prazo)</div>'
             '</div></div>',
             unsafe_allow_html=True,
         )
@@ -879,7 +882,7 @@ def main():
                     elif pd.notna(child.get("duedate_dt")) and today > child["duedate_dt"]:
                         c_color = COLOR_OVERDUE
                         c_risk = "🔴"
-                    elif child["status"] in ["Bloqueado", "BUGS"]:
+                    elif child["status"] in ["Bloqueado", "BUGS", "Bugs"]:
                         c_color = COLOR_OVERDUE
                         c_risk = "🔴"
                     else:
@@ -1421,7 +1424,7 @@ def main():
                 continue
 
             done_count = len(member_items[member_items["status"] == "Done"])
-            wip_count = len(member_items[~member_items["status"].isin(["Done", "To Do", "Backlog"])])
+            wip_count = len(member_items[~member_items["status"].isin(["Done", "To Do", "Backlog", "Pausado"])])
             member_leads = member_items[member_items["lead_days"].notna()]
             avg_lead_member = f"{member_leads['lead_days'].mean():.1f}d" if len(member_leads) > 0 else "–"
 
@@ -1432,7 +1435,7 @@ def main():
                 mc3.metric("WIP", wip_count)
                 mc4.metric("Lead Time", avg_lead_member)
 
-                active_items = member_items[~member_items["status"].isin(["Done", "To Do", "Backlog"])]
+                active_items = member_items[~member_items["status"].isin(["Done", "To Do", "Backlog", "Pausado"])]
                 if not active_items.empty:
                     st.markdown("**Itens ativos:**")
                     st.dataframe(
@@ -1459,7 +1462,7 @@ def main():
         st.markdown("#### 🚨 Alertas e Saúde do Board")
 
         # Blocked items
-        blocked_items = filtered[filtered["status"].isin(["Bloqueado", "BUGS"])]
+        blocked_items = filtered[filtered["status"].isin(["Bloqueado", "BUGS", "Bugs"])]
         st.markdown(f"##### 🔴 Itens Bloqueados ({len(blocked_items)})")
         if not blocked_items.empty:
             st.dataframe(
@@ -1487,7 +1490,7 @@ def main():
         # Stale items (>7 days without update in active status)
         seven_days_ago = (now_brt() - timedelta(days=7)).strftime("%Y-%m-%d")
         stale = filtered[
-            (~filtered["status"].isin(["Done", "To Do", "Backlog"]))
+            (~filtered["status"].isin(["Done", "To Do", "Backlog", "Pausado"]))
             & (filtered["updated"] <= seven_days_ago)
         ]
         st.markdown(f"##### ⏰ Itens Parados há +7 dias ({len(stale)})")
